@@ -12,6 +12,11 @@ from app.celery import celery_init_app
 # Load congigurations
 from app.web.config import Config
 
+# Load database
+from app.web.db import db, init_db_command
+from app.web.db import models
+
+# Load views
 from app.web.views import (
     server_views
 )
@@ -25,7 +30,7 @@ def create_app():
     app.config.from_object(Config)
 
     socketio.init_app(app, cors_allowed_origins="*")
-    # register_extensions(app)
+    register_extensions(app)
     # register_hooks(app)
     register_blueprints(app)
     if Config.CELERY["broker_url"]:
@@ -33,8 +38,14 @@ def create_app():
 
     return app
 
+# Blueprints for Flask
 def register_blueprints(app):
     app.register_blueprint(server_views.bp)
+
+# Database initialization
+def register_extensions(app):
+    db.init_app(app)
+    app.cli.add_command(init_db_command)
 
 # In-memory storage for messages
 messages_history = []
