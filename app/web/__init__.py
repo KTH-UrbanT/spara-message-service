@@ -1,17 +1,43 @@
+# Load environment variables
 from dotenv import load_dotenv
+
+# Flask application
 from flask import Flask
+# SocketIO
 from flask_socketio import SocketIO, emit
 
-app = Flask(__name__)
-app.config['SECRET_KEY'] = 'your_secret_key'
-socketio = SocketIO(app, cors_allowed_origins="*")
+# Celery
+from app.celery import celery_init_app
+
+# Load congigurations
+from app.web.config import Config
+
+from app.web.views import (
+    server_views
+)
+
+
+socketio = SocketIO()
+
+def create_app():
+    app = Flask(__name__)
+    app.url_map.strict_slashes = False
+    app.config.from_object(Config)
+
+    socketio.init_app(app, cors_allowed_origins="*")
+    # register_extensions(app)
+    # register_hooks(app)
+    register_blueprints(app)
+    if Config.CELERY["broker_url"]:
+        celery_init_app(app)
+
+    return app
+
+def register_blueprints(app):
+    app.register_blueprint(server_views.bp)
 
 # In-memory storage for messages
 messages_history = []
-
-@app.route('/')
-def index():
-    return "SPARA server is running"
 
 @socketio.on('message')
 def handle_message(data):
@@ -28,10 +54,3 @@ def handle_connect():
     # Send message history to the newly connected client
     for message in messages_history:
         emit('message', message)
-
-if __name__ == '__main__':
-    socketio.run(app,
-                 host='0.0.0.0',
-                 port=2345,
-                 debug=True
-                 )

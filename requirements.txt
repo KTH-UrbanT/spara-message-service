@@ -6,3 +6,9 @@ Flask-SocketIO==5.3.6
 
 # Dotenv - for environment variables
 python-dotenv==1.0.1
+
+# Invoke - for task management
+invoke==2.2.0
+
+# Celery
+celery=5.3.6
