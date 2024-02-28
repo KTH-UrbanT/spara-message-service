@@ -1,8 +1,11 @@
 # Flask - for web server
-Flask==3.0.2
+flask==3.0.2
+
+# CORS - for cross-origin requests
+flask_cors=4.0.0
 
 # SocketIO - for websockets
-Flask-SocketIO==5.3.6
+flask-socketio==5.3.6
 
 # Dotenv - for environment variables
 python-dotenv==1.0.1

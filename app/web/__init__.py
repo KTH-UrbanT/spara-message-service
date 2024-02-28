@@ -3,6 +3,10 @@ from dotenv import load_dotenv
 
 # Flask application
 from flask import Flask
+
+# CORS
+from flask_cors import CORS
+
 # SocketIO
 from flask_socketio import SocketIO, emit
 
@@ -16,10 +20,17 @@ from app.web.config import Config
 from app.web.db import db, init_db_command
 from app.web.db import models
 
+# Load hooks
+from app.web.hooks import load_logged_in_user, handle_error, add_headers
+
 # Load views
 from app.web.views import (
-    server_views
+    client_views,
+    conversation_views
 )
+
+# Load chat module
+from app.chat import build_chat, ChatArgs
 
 
 socketio = SocketIO()
@@ -31,7 +42,7 @@ def create_app():
 
     socketio.init_app(app, cors_allowed_origins="*")
     register_extensions(app)
-    # register_hooks(app)
+    register_hooks(app)
     register_blueprints(app)
     if Config.CELERY["broker_url"]:
         celery_init_app(app)
@@ -40,12 +51,18 @@ def create_app():
 
 # Blueprints for Flask
 def register_blueprints(app):
-    app.register_blueprint(server_views.bp)
+    app.register_blueprint(client_views.bp)
 
 # Database initialization
 def register_extensions(app):
     db.init_app(app)
     app.cli.add_command(init_db_command)
+
+def register_hooks(app):
+    CORS(app)
+    app.before_request(load_logged_in_user)
+    app.after_request(add_headers)
+    app.register_error_handler(Exception, handle_error)
 
 # In-memory storage for messages
 messages_history = []
@@ -59,6 +76,26 @@ def handle_message(data):
     if len(messages_history) > 50:
         messages_history.pop(0)
     emit('message', data, broadcast=True)
+    #     input = request.json.get("input")
+    # streaming = request.args.get("stream", False)
+
+    # pdf = conversation.pdf
+
+    chat_args = ChatArgs(
+        conversation_id="1",
+        streaming=False,
+        metadata={
+            "conversation_id": "1",
+            "user_id": "1",
+        },
+    )
+
+    chat = build_chat(chat_args)
+
+    if not chat:
+        return "Chat not yet implemented!"
+    
+    emit('message', chat.run(data), broadcast=True)
 
 @socketio.on('connect')
 def handle_connect():
