@@ -1,4 +1,5 @@
 .env
 *.cpython-311.pyc
 instance/*.*
-/data
+
+data/
