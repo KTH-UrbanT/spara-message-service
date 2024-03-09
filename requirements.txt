@@ -13,5 +13,8 @@ python-dotenv==1.0.1
 # Invoke - for task management
 invoke==2.2.0
 
-# Celery
+# Celery - for background tasks
 celery=5.3.6
+
+# Pyboxen - for message formatting in command line
+pyboxen==1.3.0
