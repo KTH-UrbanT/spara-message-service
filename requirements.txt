@@ -13,9 +13,12 @@ python-dotenv==1.0.1
 # Invoke - for task management
 invoke==2.2.0
 
-# Celery
+# Celery - for background tasks
 celery=5.3.6
 
-#langchain - for chatbot
-langchain==0.0.352
-openai==0.27.8
+# Pyboxen - for message formatting in command line
+pyboxen==1.3.0
+
+# Langchain & OpenAI - for chatbot
+langchain==0.1.6
+openai==1.12.0

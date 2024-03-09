@@ -1,20 +1,32 @@
-# from langchain.chains import ConversationalRetrievalChain
-from langchain.chains import LLMChain
-from langchain.prompts import PromptTemplate
-from app.chat.models import ChatArgs
-# from app.chat.vector_stores.pinecone import build_retriever
-from app.chat.llms.chatopenai import build_llm
-# from app.chat.memories.sql_memory import build_memory
+# Load environment variables
+from dotenv import load_dotenv
 
-def build_chat(chat_args: ChatArgs):
-    # retriever = build_retriever(chat_args)
-    # llm = build_llm(chat_args)
-    # prompt = PromptTemplate(template="You are a helpful assistant that can answer any questions in Ukrainian.",input_variables=["data"])
-    # memory = build_memory(chat_args)
+# Simple OpenAI GPT-3 chatbot for CLI testing
+from openai import OpenAI
 
-    return LLMChain(
-        # llm=llm,
-        # prompt=prompt
-        # memory=memory,
-        # retriever=retriever
-    )
+load_dotenv()
+client = OpenAI()
+
+class Chat:
+    def __init__(self, model="gpt-3.5-turbo", temperature=0.7, max_tokens=150, stop=None):
+        self.model = model
+        self.temperature = temperature
+        self.max_tokens = max_tokens
+        self.stop = stop
+
+    def generate_response(self, prompt):
+        try:
+            response = client.chat.completions.create(
+                model=self.model,
+                messages=[{"role": "system", "content": "You are a helpful assistant."},
+                          {"role": "user", "content": prompt}],
+                temperature=self.temperature,
+                max_tokens=self.max_tokens,
+                stop=self.stop
+            )
+            return response.choices[0].message.content
+        except Exception as e:
+            return str(e)
+
+def build_chat(model="gpt-3.5-turbo"):
+    return Chat(model=model)
