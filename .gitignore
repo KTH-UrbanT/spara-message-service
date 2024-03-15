@@ -1,5 +1,5 @@
 .env
-*.cpython-311.pyc
-instance/*.*
+__pycache__
+instance/
 
 data/
