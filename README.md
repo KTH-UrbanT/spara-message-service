@@ -56,3 +56,21 @@ Then:
 ```
 flask --app app.web init-db
 ```
+
+### To run the command-line interface (CLI)
+
+```
+# On MacOS, WSL, Linux
+source .venv/bin/activate
+
+# On Windows
+.\.venv\Scripts\activate
+```
+
+Then:
+
+```
+python cli.py
+```
+
+_In case you need another chat methods for testing, add them in `app/cli/__init__.py`._
