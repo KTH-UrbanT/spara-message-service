@@ -1,7 +1,7 @@
-
 from dataclasses import dataclass
 import psycopg2
 import os
+
 
 @dataclass
 class User:
@@ -10,6 +10,7 @@ class User:
     email: str
     password: str
     created_at: str
+
 
 @dataclass
 class Session:
@@ -20,6 +21,7 @@ class Session:
     created_at: str
     last_accessed: str
 
+
 @dataclass
 class Message:
     message_id: int
@@ -27,17 +29,20 @@ class Message:
     sender_id: int
     content: str
     sent_at: str
-    
+
+
 def get_connection():
     return psycopg2.connect(
-        host=os.environ['DB_HOST'],
-        database=os.environ['DB_NAME'],
-        user=os.environ['DB_USER'],
-        password=os.environ['DB_PASSWORD'],
-        port=os.environ['DB_PORT']
+        host=os.environ["DB_HOST"],
+        database=os.environ["DB_NAME"],
+        user=os.environ["DB_USER"],
+        password=os.environ["DB_PASSWORD"],
+        port=os.environ["DB_PORT"],
     )
 
+
 # DATABASE FUNCTIONS - USERS
+
 
 def insert_user(username: str, email: str, password: str) -> int:
     """Insert a new user into the users table
@@ -54,13 +59,13 @@ def insert_user(username: str, email: str, password: str) -> int:
         # Establish the connection
         connection = get_connection()
         cursor = connection.cursor()
-        
+
         # SQL query to insert a new user
         insert_query = f"""
         INSERT INTO users (username, email, password_hash, created_at)
         VALUES ('{username}', '{email}', '{password}', NOW()) RETURNING user_id;
         """
-        
+
         # Execute the query with parameters
         cursor.execute(insert_query)
 
@@ -81,6 +86,7 @@ def insert_user(username: str, email: str, password: str) -> int:
             cursor.close()
         if connection:
             connection.close()
+
 
 def get_users() -> list[User]:
     """Select all rows from the users table
@@ -105,25 +111,28 @@ def get_users() -> list[User]:
         # Convert the results to a list of dictionaries
         users_list = []
         for user in users:
-            users_list.append({
-                'user_id': user[0],
-                'username': user[1],
-                'email': user[2],
-                'created_at': user[3]
-            })
+            users_list.append(
+                {
+                    "user_id": user[0],
+                    "username": user[1],
+                    "email": user[2],
+                    "created_at": user[3],
+                }
+            )
 
         return users_list
 
     except Exception as e:
         raise e
-    
+
     finally:
         # Close the connection and cursor
         if cursor:
             cursor.close()
         if connection:
             connection.close()
-    
+
+
 def get_selected_user(column_name: str, filter_value: str | int) -> User:
     """Select user from filtered by selected column.
 
@@ -138,21 +147,26 @@ def get_selected_user(column_name: str, filter_value: str | int) -> User:
         # Raise error if column name is invalid
         if column_name not in ["user_id", "username", "email"]:
             raise ValueError("Invalid column name.")
-        
+
         # Raise error if user_id column filter value is not integer
         if column_name == "user_id" and not isinstance(filter_value, int):
             raise TypeError("'filter_value' should be 'int' for user_id column name.")
-        
+
         # Raise error if username or email filter value is not string
-        if ((column_name == "username" or column_name=="email") and 
-            not isinstance(filter_value, str)):
-            raise TypeError("'filter_value' should be 'str' for username and email column name.")
+        if (column_name == "username" or column_name == "email") and not isinstance(
+            filter_value, str
+        ):
+            raise TypeError(
+                "'filter_value' should be 'str' for username and email column name."
+            )
 
         # Establish the connection
         connection = get_connection()
         cursor = connection.cursor()
 
-        filter_str = f"'{filter_value}'" if isinstance(filter_value, str) else filter_value
+        filter_str = (
+            f"'{filter_value}'" if isinstance(filter_value, str) else filter_value
+        )
         select_query = f"""
         SELECT user_id, username, email, password_hash, created_at FROM users
         WHERE {column_name}={filter_str};
@@ -169,18 +183,18 @@ def get_selected_user(column_name: str, filter_value: str | int) -> User:
 
         # Convert the results to a dictionary
         user_dict = {
-                'user_id': user_row[0],
-                'username': user_row[1],
-                'email': user_row[2],
-                'password': user_row[3],
-                'created_at': user_row[4]
-            }
+            "user_id": user_row[0],
+            "username": user_row[1],
+            "email": user_row[2],
+            # "password": user_row[3],
+            "created_at": user_row[4],
+        }
 
         return user_dict
 
     except Exception as e:
         raise e
-    
+
     finally:
         # Close the connection and cursor
         if cursor:
@@ -188,7 +202,9 @@ def get_selected_user(column_name: str, filter_value: str | int) -> User:
         if connection:
             connection.close()
 
+
 # DATABASE FUNCTIONS - SESSIONS
+
 
 def insert_session(user_id: int, session_token: str, is_active: bool) -> int:
     """_summary_
@@ -205,13 +221,13 @@ def insert_session(user_id: int, session_token: str, is_active: bool) -> int:
         # Establish the connection
         connection = get_connection()
         cursor = connection.cursor()
-        
+
         # SQL query to insert a new user
         insert_query = f"""
-        INSERT INTO users (user_id, session_token, is_active, created_at, last_accessed)
+        INSERT INTO sessions (user_id, session_token, is_active, created_at, last_accessed)
         VALUES ({user_id}, '{session_token}', {'TRUE' if is_active else 'FALSE'}, NOW(), NOW()) RETURNING session_id;
         """
-        
+
         # Execute the query with parameters
         cursor.execute(insert_query)
 
@@ -233,11 +249,10 @@ def insert_session(user_id: int, session_token: str, is_active: bool) -> int:
         if connection:
             connection.close()
 
-def update_session_access_time():
-    """_summary_
-    """
 
-def get_selected_session(column_name: str, filter_value: int, filter_is_active: bool = False) -> list[Session]:
+def get_selected_session(
+    column_name: str, filter_value: int, filter_is_active: bool = False
+) -> list[Session]:
     """Select sessions from filtered by selected column.
 
     Args:
@@ -253,7 +268,7 @@ def get_selected_session(column_name: str, filter_value: int, filter_is_active: 
         # Raise error if column name is invalid
         if column_name not in ["session_id", "user_id"]:
             raise ValueError("Invalid column name.")
-        
+
         # Establish the connection
         connection = get_connection()
         cursor = connection.cursor()
@@ -276,20 +291,22 @@ def get_selected_session(column_name: str, filter_value: int, filter_is_active: 
         # Convert the results to a list of dictionaries
         session_list = []
         for session in session_rows:
-            session_list.append({
-                'session_id': session[0],
-                'user_id': session[0],
-                'session_token': session[1],
-                'is_active': session[2],
-                'created_at': session[3],
-                'last_accessed': session[4]
-            })
+            session_list.append(
+                {
+                    "session_id": session[0],
+                    "user_id": session[0],
+                    "session_token": session[1],
+                    "is_active": session[2],
+                    "created_at": session[3],
+                    "last_accessed": session[4],
+                }
+            )
 
         return session_list
 
     except Exception as e:
         raise e
-    
+
     finally:
         # Close the connection and cursor
         if cursor:
@@ -299,6 +316,7 @@ def get_selected_session(column_name: str, filter_value: int, filter_is_active: 
 
 
 # DATABASE FUNCTIONS - MESSAGES
+
 
 def get_selected_messages(column_name: str, filter_value: int) -> list[Message]:
     """Select messages from filtered by selected column.
@@ -314,7 +332,7 @@ def get_selected_messages(column_name: str, filter_value: int) -> list[Message]:
         # Raise error if column name is invalid
         if column_name not in ["message_id", "session_id", "sender_id"]:
             raise ValueError("Invalid column name.")
-        
+
         # Establish the connection
         connection = get_connection()
         cursor = connection.cursor()
@@ -336,19 +354,21 @@ def get_selected_messages(column_name: str, filter_value: int) -> list[Message]:
         # Convert the results to a list of dictionaries
         message_list = []
         for message in message_rows:
-            message_list.append({
-                'message_id': message[0],
-                'session_id': message[1],
-                'sender_id': message[2],
-                'content': message[3],
-                'sent_at': message[4],
-            })
+            message_list.append(
+                {
+                    "message_id": message[0],
+                    "session_id": message[1],
+                    "sender_id": message[2],
+                    "content": message[3],
+                    "sent_at": message[4],
+                }
+            )
 
         return message_list
 
     except Exception as e:
         raise e
-    
+
     finally:
         # Close the connection and cursor
         if cursor:
@@ -356,12 +376,12 @@ def get_selected_messages(column_name: str, filter_value: int) -> list[Message]:
         if connection:
             connection.close()
 
-def insert_messages(messages: list[Message]):
+
+def insert_messages(messages: list[dict]):
     """Insert multiple messages into the messages table.
 
     Args:
         messages (list[dict]): List of message dictionaries, each containing keys:
-            - message_id (int)
             - session_id (int)
             - sender_id (int)
             - content (str)
@@ -377,11 +397,6 @@ def insert_messages(messages: list[Message]):
     if not messages:
         raise ValueError("Messages list is empty.")
 
-    required_keys = {"message_id", "session_id", "sender_id", "content", "sent_at"}
-    for message in messages:
-        if not required_keys.issubset(message.keys()):
-            raise ValueError(f"Missing required keys in message: {message}")
-
     try:
         # Establish the connection
         connection = get_connection()
@@ -391,11 +406,11 @@ def insert_messages(messages: list[Message]):
         placeholders = []
         for message in messages:
             placeholders.append(
-                f"({message["message_id"]}, {message["session_id"]}, {message["sender_id"]}, '{message["content"]}', {message["sent_at"]})"
+                f"({message.session_id}, {message.sender_id}, '{message.content}', {message.sent_at})"
             )
 
         insert_query = f"""
-        INSERT INTO messages (message_id, session_id, sender_id, content, sent_at)
+        INSERT INTO messages (session_id, sender_id, content, sent_at)
         VALUES {', '.join(placeholders)} RETURNING message_id;
         """
 
@@ -404,7 +419,7 @@ def insert_messages(messages: list[Message]):
 
         # Commit the transaction
         connection.commit()
-        
+
         # Fetch all results
         message_ids = cursor.fetchall()
         return message_ids
