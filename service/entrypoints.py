@@ -1,4 +1,6 @@
 # routes/api.py
+import sys
+import os
 from fastapi import APIRouter, HTTPException
 from service.database import (
     get_users,
@@ -13,6 +15,9 @@ from service.database import (
 from pydantic import BaseModel, EmailStr
 import psycopg2.errors
 
+##from spara_backend.redis_pub_sub import RedisEventManager
+
+# event_manager = RedisEventManager()
 
 class LoginBody(BaseModel):
     email: EmailStr
