@@ -8,7 +8,7 @@ import redis
 # Create Socket.IO server with CORS settings
 sio = socketio.AsyncServer(
     async_mode="asgi",
-    cors_allowed_origins=ALLOWED_ORIGINS,
+    cors_allowed_origins="*",
     logger=True,
     engineio_logger=True
 )
