@@ -315,6 +315,53 @@ def get_selected_session(
             connection.close()
 
 
+def get_all_sessions() -> list[Session]:
+    """Select all rows from the sessions table
+
+    Returns:
+        list: List of sessions dict
+    """
+    try:
+        # Establish the connection
+        connection = get_connection()
+        cursor = connection.cursor()
+
+        # SQL query to fetch all users
+        select_query = "SELECT session_id, user_id, session_token, is_active, last_accessed FROM sessions;"
+
+        # Execute the query
+        cursor.execute(select_query)
+
+        # Fetch all results
+        sessions = cursor.fetchall()
+
+        # Convert the results to a list of dictionaries
+        sessions_list = []
+        for session in sessions:
+            sessions_list.append(
+                {
+                    "session_id": session[0],
+                    "user_id": session[1],
+                    "session_token": session[2],
+                    "is_active": session[3],
+                    "created_at": session[4],
+                    "last_accessed": session[5],
+                }
+            )
+
+        return sessions_list
+
+    except Exception as e:
+        raise e
+
+    finally:
+        # Close the connection and cursor
+        if cursor:
+            cursor.close()
+        if connection:
+            connection.close()
+
+
 # DATABASE FUNCTIONS - MESSAGES
 
 

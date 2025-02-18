@@ -7,10 +7,7 @@ import redis
 
 # Create Socket.IO server with CORS settings
 sio = socketio.AsyncServer(
-    async_mode="asgi",
-    cors_allowed_origins="*",
-    logger=True,
-    engineio_logger=True
+    async_mode="asgi", cors_allowed_origins="*", logger=True, engineio_logger=True
 )
 
 # Initialize FastAPI app and mount Socket.IO as ASGI middleware
@@ -20,11 +17,13 @@ socket_app = socketio.ASGIApp(sio, app)
 
 # Redis connection
 redis_client = redis.StrictRedis(host="127.0.0.1", port=6379, decode_responses=True)
-print('result is here')
+print("result is here")
+
 
 @app.get("/")
 async def root():
     return {"message": "WebSocket and Redis app running!"}
+
 
 @app.get("/test-redis")
 async def test_redis():
