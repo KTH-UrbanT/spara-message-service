@@ -3,3 +3,5 @@ uvicorn
 python-socketio
 psycopg2
 pydantic[email]
+redis
+schedule
