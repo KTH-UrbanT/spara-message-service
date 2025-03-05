@@ -107,3 +107,17 @@ if __name__ == "__main__":
         email_processor.check_mailbox()
         email_processor.process_queue()
         time.sleep(30)  # Check mailbox every 30 seconds
+        
+        
+'''
+EMAIL_ACCOUNT = ''
+EMAIL_ADDRESS = ''
+# quoting the password as it contains special characters
+PASSWORD = ''
+
+IMAP_URL = 
+SMTP_SERVER = 
+
+IMAP_PORT = 
+SMTP_PORT =  
+'''

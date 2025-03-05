@@ -14,7 +14,7 @@ schedule.every(30).seconds.do(scheduled_thread_read)
 async def run_scheduler():
     while True:
         schedule.run_pending()
-        await asyncio.sleep(1)  # Check every second for pending tasks
+        await asyncio.sleep(30)  # Check every second for pending tasks
 
 
 # Start scheduler on FastAPI startup
