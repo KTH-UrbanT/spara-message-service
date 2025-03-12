@@ -1,40 +1,53 @@
 from socket_manager.app import redis_client
 import json
-from service.database import insert_session, insert_messages, get_all_sessions
-import time 
+from service.database import (
+    insert_session,
+    insert_messages,
+    get_all_sessions,
+    update_session,
+)
+import time
 from datetime import datetime, timezone
-EXPIRATION_TIME = 5 * 60  # 300 seconds
+
+EXPIRATION_TIME = 1 * 60  # 300 seconds
+
 
 def scheduled_thread_read():
-    print("I'm working scheduled job...")
+    print("Scheduled job running...")
+    # Fetch all thread keys from Redis
     thread_keys = redis_client.keys()
 
+    # Check if any threads exist
     if not thread_keys:
-        print("No threads found")
+        print("No threads found.")
         return
 
     insert_dict = []
-    current_time = int(time.time()) 
+    current_time = int(time.time())
     for key in thread_keys:
-        print("KEY", key)
         thread_content = redis_client.lrange(key, 0, -1)
-        if last_update_time(thread_content , current_time) is True : 
+        print("THREAD KEY: ", key)
+        print("THREAD CONTENT: ", thread_content)
+        if last_update_time(thread_content, current_time) is True:
             insert_dict.append(key)
-        #insert_dict[key] = read_thread_messages(thread_content)
-        #print("MESSAGES: ", insert_dict[key])
+        # insert_dict[key] = read_thread_messages(thread_content)
+        # print("MESSAGES: ", insert_dict[key])
 
     # Insert the messages into the database
-    print("Inserting messages into the database...")
-    print(insert_dict)
+    # Check if there are any threads to insert
+    if not insert_dict:
+        print("No threads to insert.")
+        return
+
     insert_threads(insert_dict)
 
-    # Process the messages and delete the thread
-    # redis_client.delete(*thread_keys)
 
+def last_update_time(thread_content, current_time):
+    """Check if the last message in the thread is older than the expiration time."""
+    if not thread_content:
+        return False
 
-def last_update_time(thread_content , current_time):
-    print("processing messages...")
-    if json.loads(thread_content[-1])['timestamp'] < (current_time - EXPIRATION_TIME) : 
+    if json.loads(thread_content[-1])["timestamp"] < (current_time - EXPIRATION_TIME):
         return True
     return False
 
@@ -50,6 +63,25 @@ def insert_threads(processed_threads):
                 print(f"Thread {thread_id} is empty or does not exist.")
                 continue  # Skip empty threads
 
+            all_sessions = get_all_sessions()
+            print("SESSIONS: ", get_all_sessions())
+
+            # Check if the thread exists in the database
+            is_session_exists = [
+                session
+                for session in all_sessions
+                if session["session_token"] == thread_id
+            ]
+            print("IS SESSION EXISTS: ", is_session_exists)
+
+            if not is_session_exists:
+                print(f"Thread {thread_id} does not exist in the database.")
+                # user_id=4 is the default user_id for testing purposes
+                # TODO: update this to use the actual user_id
+                session_id = insert_session(4, thread_id, True)
+            else:
+                session_id = is_session_exists[0]["session_id"]
+
             # Convert JSON strings to Python objects
             try:
                 thread_content_updated = [json.loads(msg) for msg in thread_content]
@@ -60,10 +92,15 @@ def insert_threads(processed_threads):
             # Convert timestamps to UTC format
             thread_content_updated = [
                 {
-                    **msg, 
-                    'timestamp': datetime.fromtimestamp(msg.get('timestamp', 0), tz=timezone.utc).isoformat()
+                    **msg,
+                    "sent_at": datetime.fromtimestamp(
+                        msg["timestamp"], tz=timezone.utc
+                    ).isoformat(),
+                    "session_id": session_id,
+                    "sender_id": 4,  # Default sender_id for testing purposes
                 }
-                for msg in thread_content_updated if 'timestamp' in msg
+                for msg in thread_content_updated
+                if "timestamp" in msg
             ]
 
             # Validate if messages exist after processing
@@ -71,12 +108,15 @@ def insert_threads(processed_threads):
                 print(f"Thread {thread_id} has no valid messages after processing.")
                 continue
 
-            ### Database Push Code (Placeholder)
-            # insert_into_database(thread_id, thread_content_updated)  # Replace with actual DB function
+            # Insert messages into the database
+            insert_messages(thread_content_updated)
 
             # Delete thread from Redis after successful processing
             redis_client.delete(thread_id)
             print(f"Thread {thread_id} successfully processed and deleted from Redis.")
+
+            # Update the session is_active status
+            update_session(session_id, "NOW()", False)
 
         except Exception as e:
             print(f"Error processing thread {thread_id}: {e}")

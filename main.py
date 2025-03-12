@@ -1,13 +1,15 @@
 from socket_manager.app import app, socket_app
 from config.settings import HOST, PORT
-from events.scheduled_handler import scheduled_thread_read
+from events.scheduled_handler import scheduled_thread_read, EXPIRATION_TIME
+from events.handlers import *
 import asyncio
 import schedule
 import uvicorn
 
 
-# Schedule the job every 30 seconds
-schedule.every(30).seconds.do(scheduled_thread_read)
+# Schedule the job every 300 seconds
+schedule.every(EXPIRATION_TIME).seconds.do(scheduled_thread_read)
+# schedule.every(30).seconds.do(scheduled_thread_read) # For testing purposes
 
 
 # Async function to run schedule loop

@@ -250,6 +250,46 @@ def insert_session(user_id: int, session_token: str, is_active: bool) -> int:
             connection.close()
 
 
+def update_session(session_id: int, last_access_time: str, is_active: bool):
+    """Update the session with the given session_id
+
+    Args:
+        session_id (int): session_id to update
+        last_access_time (str): last_accessed time string
+        is_active (bool): True if the session is active, False if not.
+
+    Raises:
+        Exception: If any database error occurs.
+    """
+    try:
+        # Establish the connection
+        connection = get_connection()
+        cursor = connection.cursor()
+
+        # SQL query to update the session
+        update_query = f"""
+        UPDATE sessions
+        SET last_accessed='{last_access_time}', is_active={'TRUE' if is_active else 'FALSE'}
+        WHERE session_id={session_id};
+        """
+
+        # Execute the query with parameters
+        cursor.execute(update_query)
+
+        # Commit the transaction
+        connection.commit()
+
+    except Exception as e:
+        raise e
+
+    finally:
+        # Close the connection and cursor
+        if cursor:
+            cursor.close()
+        if connection:
+            connection.close()
+
+
 def get_selected_session(
     column_name: str, filter_value: int, filter_is_active: bool = False
 ) -> list[Session]:
@@ -336,18 +376,16 @@ def get_all_sessions() -> list[Session]:
         sessions = cursor.fetchall()
 
         # Convert the results to a list of dictionaries
-        sessions_list = []
-        for session in sessions:
-            sessions_list.append(
-                {
-                    "session_id": session[0],
-                    "user_id": session[1],
-                    "session_token": session[2],
-                    "is_active": session[3],
-                    "created_at": session[4],
-                    "last_accessed": session[5],
-                }
-            )
+        sessions_list = [
+            {
+                "session_id": session[0],
+                "user_id": session[1],
+                "session_token": session[2],
+                "is_active": session[3],
+                "last_accessed": session[4],
+            }
+            for session in sessions
+        ]
 
         return sessions_list
 
@@ -453,7 +491,7 @@ def insert_messages(messages: list[dict]):
         placeholders = []
         for message in messages:
             placeholders.append(
-                f"({message.session_id}, {message.sender_id}, '{message.content}', {message.sent_at})"
+                f"({message['session_id'] }, {message['sender_id']}, '{message['content']}', '{message['sent_at']}')"
             )
 
         insert_query = f"""
