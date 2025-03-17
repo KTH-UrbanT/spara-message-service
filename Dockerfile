@@ -2,7 +2,7 @@
 FROM python:3.9
 
 # Set the working directory in the container
-WORKDIR /app
+WORKDIR /message-service
 
 # Copy the requirements file and install dependencies
 COPY requirements.txt .
