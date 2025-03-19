@@ -10,6 +10,7 @@ class User:
     email: str
     password: str
     created_at: str
+    last_logged_in: str
 
 
 @dataclass
@@ -88,6 +89,45 @@ def insert_user(username: str, email: str, password: str) -> int:
             connection.close()
 
 
+def insert_empty_user() -> int:
+    """Insert a new user into the users table
+
+    Returns:
+        int: user_id of new user
+    """
+    try:
+        # Establish the connection
+        connection = get_connection()
+        cursor = connection.cursor()
+
+        # SQL query to insert a new user
+        insert_query = f"""
+        INSERT INTO users (created_at, last_logged_in)
+        VALUES (NOW(), NOW()) RETURNING user_id;
+        """
+
+        # Execute the query with parameters
+        cursor.execute(insert_query)
+
+        # Commit the transaction
+        connection.commit()
+
+        # Fetch the generated user_id for the inserted user
+        user_id = cursor.fetchone()[0]
+
+        return user_id
+
+    except Exception as e:
+        raise e
+
+    finally:
+        # Close the connection and cursor
+        if cursor:
+            cursor.close()
+        if connection:
+            connection.close()
+
+
 def get_users() -> list[User]:
     """Select all rows from the users table
 
@@ -100,7 +140,9 @@ def get_users() -> list[User]:
         cursor = connection.cursor()
 
         # SQL query to fetch all users
-        select_query = "SELECT user_id, username, email, created_at FROM users;"
+        select_query = (
+            "SELECT user_id, username, email, created_at, last_logged_in FROM users;"
+        )
 
         # Execute the query
         cursor.execute(select_query)
@@ -117,6 +159,7 @@ def get_users() -> list[User]:
                     "username": user[1],
                     "email": user[2],
                     "created_at": user[3],
+                    "last_logged_in": user[4],
                 }
             )
 
@@ -168,7 +211,7 @@ def get_selected_user(column_name: str, filter_value: str | int) -> User:
             f"'{filter_value}'" if isinstance(filter_value, str) else filter_value
         )
         select_query = f"""
-        SELECT user_id, username, email, password_hash, created_at FROM users
+        SELECT user_id, username, email, password_hash, created_at, last_logged_in FROM users
         WHERE {column_name}={filter_str};
         """
 
@@ -188,6 +231,7 @@ def get_selected_user(column_name: str, filter_value: str | int) -> User:
             "email": user_row[2],
             # "password": user_row[3],
             "created_at": user_row[4],
+            "last_logged_in": user_row[5],
         }
 
         return user_dict
