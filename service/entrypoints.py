@@ -34,7 +34,7 @@ class RegisterBody(BaseModel):
 
 class MessageBody(BaseModel):
     session_id: int
-    sender_id: int
+    role: str
     content: str
     sent_at: str
 

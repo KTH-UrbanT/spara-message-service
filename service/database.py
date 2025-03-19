@@ -27,7 +27,7 @@ class Session:
 class Message:
     message_id: int
     session_id: int
-    sender_id: int
+    role: str
     content: str
     sent_at: str
 
@@ -378,11 +378,11 @@ def get_selected_session(
             session_list.append(
                 {
                     "session_id": session[0],
-                    "user_id": session[0],
-                    "session_token": session[1],
-                    "is_active": session[2],
-                    "created_at": session[3],
-                    "last_accessed": session[4],
+                    "user_id": session[1],
+                    "session_token": session[2],
+                    "is_active": session[3],
+                    "created_at": session[4],
+                    "last_accessed": session[5],
                 }
             )
 
@@ -467,7 +467,7 @@ def get_selected_messages(column_name: str, filter_value: int) -> list[Message]:
         cursor = connection.cursor()
 
         select_query = f"""
-        SELECT message_id, session_id, sender_id, content, sent_at FROM messages
+        SELECT message_id, session_id, role, content, sent_at FROM messages
         WHERE {column_name}={filter_value};
         """
 
@@ -487,7 +487,7 @@ def get_selected_messages(column_name: str, filter_value: int) -> list[Message]:
                 {
                     "message_id": message[0],
                     "session_id": message[1],
-                    "sender_id": message[2],
+                    "role": message[2],
                     "content": message[3],
                     "sent_at": message[4],
                 }
@@ -512,7 +512,7 @@ def insert_messages(messages: list[dict]):
     Args:
         messages (list[dict]): List of message dictionaries, each containing keys:
             - session_id (int)
-            - sender_id (int)
+            - role (str)
             - content (str)
             - sent_at (datetime)
 
@@ -526,6 +526,16 @@ def insert_messages(messages: list[dict]):
     if not messages:
         raise ValueError("Messages list is empty.")
 
+    messages_dict = [m.__dict__ for m in messages]
+    check_roles = [
+        (m["role"] not in ["user", "assistant", "system"]) for m in messages_dict
+    ]
+
+    if any(check_roles):
+        raise ValueError(
+            "Invalid role type in messages list. Valid roles are 'user', 'assistant', 'system'."
+        )
+
     try:
         # Establish the connection
         connection = get_connection()
@@ -533,13 +543,13 @@ def insert_messages(messages: list[dict]):
 
         # Prepare the SQL query
         placeholders = []
-        for message in messages:
+        for message in messages_dict:
             placeholders.append(
-                f"({message['session_id'] }, {message['sender_id']}, '{message['content']}', '{message['sent_at']}')"
+                f"({message['session_id'] }, '{message['role']}', '{message['content']}', '{message['sent_at']}')"
             )
 
         insert_query = f"""
-        INSERT INTO messages (session_id, sender_id, content, sent_at)
+        INSERT INTO messages (session_id, role, content, sent_at)
         VALUES {', '.join(placeholders)} RETURNING message_id;
         """
 
