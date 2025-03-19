@@ -526,10 +526,7 @@ def insert_messages(messages: list[dict]):
     if not messages:
         raise ValueError("Messages list is empty.")
 
-    messages_dict = [m.__dict__ for m in messages]
-    check_roles = [
-        (m["role"] not in ["user", "assistant", "system"]) for m in messages_dict
-    ]
+    check_roles = [(m["role"] not in ["user", "assistant", "system"]) for m in messages]
 
     if any(check_roles):
         raise ValueError(
@@ -543,7 +540,7 @@ def insert_messages(messages: list[dict]):
 
         # Prepare the SQL query
         placeholders = []
-        for message in messages_dict:
+        for message in messages:
             placeholders.append(
                 f"({message['session_id'] }, '{message['role']}', '{message['content']}', '{message['sent_at']}')"
             )

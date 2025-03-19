@@ -168,7 +168,8 @@ async def get_messages_by_session_id(session_id: int):
 @router.post("/messages/")
 async def create_message(messages: list[MessageBody]):
     try:
-        result = insert_messages(messages=messages)
+        messages_dict = [m.__dict__ for m in messages]
+        result = insert_messages(messages=messages_dict)
         return result
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
