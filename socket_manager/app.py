@@ -1,5 +1,7 @@
 import socketio
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+
 from service.entrypoints import router
 from config.settings import ALLOWED_ORIGINS
 import redis
@@ -12,6 +14,15 @@ sio = socketio.AsyncServer(
 
 # Initialize FastAPI app and mount Socket.IO as ASGI middleware
 app = FastAPI()
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 app.include_router(router)
 socket_app = socketio.ASGIApp(sio, app)
 

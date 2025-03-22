@@ -74,11 +74,11 @@ def insert_threads(processed_threads):
             ]
             print("IS SESSION EXISTS: ", is_session_exists)
 
+            user_id = thread_id.split(":")[0]
+
             if not is_session_exists:
                 print(f"Thread {thread_id} does not exist in the database.")
-                # user_id=4 is the default user_id for testing purposes
-                # TODO: update this to use the actual user_id
-                session_id = insert_session(4, thread_id, True)
+                session_id = insert_session(user_id, thread_id, True)
             else:
                 session_id = is_session_exists[0]["session_id"]
 
@@ -92,15 +92,16 @@ def insert_threads(processed_threads):
             # Convert timestamps to UTC format
             thread_content_updated = [
                 {
-                    **msg,
+                    "content": msg["content"],
+                    "role": msg["role"],
                     "sent_at": datetime.fromtimestamp(
                         msg["timestamp"], tz=timezone.utc
                     ).isoformat(),
                     "session_id": session_id,
-                    "sender_id": 4,  # Default sender_id for testing purposes
+                    "sender_id": user_id,
                 }
                 for msg in thread_content_updated
-                if "timestamp" in msg
+                if "timestamp" in msg and msg["added_to_database"] == 0
             ]
 
             # Validate if messages exist after processing
