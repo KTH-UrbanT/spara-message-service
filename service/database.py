@@ -10,6 +10,7 @@ class User:
     email: str
     password: str
     created_at: str
+    last_logged_in: str
 
 
 @dataclass
@@ -26,7 +27,7 @@ class Session:
 class Message:
     message_id: int
     session_id: int
-    sender_id: int
+    role: str
     content: str
     sent_at: str
 
@@ -88,6 +89,45 @@ def insert_user(username: str, email: str, password: str) -> int:
             connection.close()
 
 
+def insert_empty_user() -> int:
+    """Insert a new user into the users table
+
+    Returns:
+        int: user_id of new user
+    """
+    try:
+        # Establish the connection
+        connection = get_connection()
+        cursor = connection.cursor()
+
+        # SQL query to insert a new user
+        insert_query = f"""
+        INSERT INTO users (created_at, last_logged_in)
+        VALUES (NOW(), NOW()) RETURNING user_id;
+        """
+
+        # Execute the query with parameters
+        cursor.execute(insert_query)
+
+        # Commit the transaction
+        connection.commit()
+
+        # Fetch the generated user_id for the inserted user
+        user_id = cursor.fetchone()[0]
+
+        return user_id
+
+    except Exception as e:
+        raise e
+
+    finally:
+        # Close the connection and cursor
+        if cursor:
+            cursor.close()
+        if connection:
+            connection.close()
+
+
 def get_users() -> list[User]:
     """Select all rows from the users table
 
@@ -100,7 +140,9 @@ def get_users() -> list[User]:
         cursor = connection.cursor()
 
         # SQL query to fetch all users
-        select_query = "SELECT user_id, username, email, created_at FROM users;"
+        select_query = (
+            "SELECT user_id, username, email, created_at, last_logged_in FROM users;"
+        )
 
         # Execute the query
         cursor.execute(select_query)
@@ -117,6 +159,7 @@ def get_users() -> list[User]:
                     "username": user[1],
                     "email": user[2],
                     "created_at": user[3],
+                    "last_logged_in": user[4],
                 }
             )
 
@@ -168,7 +211,7 @@ def get_selected_user(column_name: str, filter_value: str | int) -> User:
             f"'{filter_value}'" if isinstance(filter_value, str) else filter_value
         )
         select_query = f"""
-        SELECT user_id, username, email, password_hash, created_at FROM users
+        SELECT user_id, username, email, password_hash, created_at, last_logged_in FROM users
         WHERE {column_name}={filter_str};
         """
 
@@ -188,6 +231,7 @@ def get_selected_user(column_name: str, filter_value: str | int) -> User:
             "email": user_row[2],
             # "password": user_row[3],
             "created_at": user_row[4],
+            "last_logged_in": user_row[5],
         }
 
         return user_dict
@@ -250,6 +294,46 @@ def insert_session(user_id: int, session_token: str, is_active: bool) -> int:
             connection.close()
 
 
+def update_session(session_id: int, last_access_time: str, is_active: bool):
+    """Update the session with the given session_id
+
+    Args:
+        session_id (int): session_id to update
+        last_access_time (str): last_accessed time string
+        is_active (bool): True if the session is active, False if not.
+
+    Raises:
+        Exception: If any database error occurs.
+    """
+    try:
+        # Establish the connection
+        connection = get_connection()
+        cursor = connection.cursor()
+
+        # SQL query to update the session
+        update_query = f"""
+        UPDATE sessions
+        SET last_accessed='{last_access_time}', is_active={'TRUE' if is_active else 'FALSE'}
+        WHERE session_id={session_id};
+        """
+
+        # Execute the query with parameters
+        cursor.execute(update_query)
+
+        # Commit the transaction
+        connection.commit()
+
+    except Exception as e:
+        raise e
+
+    finally:
+        # Close the connection and cursor
+        if cursor:
+            cursor.close()
+        if connection:
+            connection.close()
+
+
 def get_selected_session(
     column_name: str, filter_value: int, filter_is_active: bool = False
 ) -> list[Session]:
@@ -294,15 +378,60 @@ def get_selected_session(
             session_list.append(
                 {
                     "session_id": session[0],
-                    "user_id": session[0],
-                    "session_token": session[1],
-                    "is_active": session[2],
-                    "created_at": session[3],
-                    "last_accessed": session[4],
+                    "user_id": session[1],
+                    "session_token": session[2],
+                    "is_active": session[3],
+                    "created_at": session[4],
+                    "last_accessed": session[5],
                 }
             )
 
         return session_list
+
+    except Exception as e:
+        raise e
+
+    finally:
+        # Close the connection and cursor
+        if cursor:
+            cursor.close()
+        if connection:
+            connection.close()
+
+
+def get_all_sessions() -> list[Session]:
+    """Select all rows from the sessions table
+
+    Returns:
+        list: List of sessions dict
+    """
+    try:
+        # Establish the connection
+        connection = get_connection()
+        cursor = connection.cursor()
+
+        # SQL query to fetch all users
+        select_query = "SELECT session_id, user_id, session_token, is_active, last_accessed FROM sessions;"
+
+        # Execute the query
+        cursor.execute(select_query)
+
+        # Fetch all results
+        sessions = cursor.fetchall()
+
+        # Convert the results to a list of dictionaries
+        sessions_list = [
+            {
+                "session_id": session[0],
+                "user_id": session[1],
+                "session_token": session[2],
+                "is_active": session[3],
+                "last_accessed": session[4],
+            }
+            for session in sessions
+        ]
+
+        return sessions_list
 
     except Exception as e:
         raise e
@@ -338,7 +467,7 @@ def get_selected_messages(column_name: str, filter_value: int) -> list[Message]:
         cursor = connection.cursor()
 
         select_query = f"""
-        SELECT message_id, session_id, sender_id, content, sent_at FROM messages
+        SELECT message_id, session_id, role, content, sent_at FROM messages
         WHERE {column_name}={filter_value};
         """
 
@@ -358,7 +487,7 @@ def get_selected_messages(column_name: str, filter_value: int) -> list[Message]:
                 {
                     "message_id": message[0],
                     "session_id": message[1],
-                    "sender_id": message[2],
+                    "role": message[2],
                     "content": message[3],
                     "sent_at": message[4],
                 }
@@ -383,7 +512,7 @@ def insert_messages(messages: list[dict]):
     Args:
         messages (list[dict]): List of message dictionaries, each containing keys:
             - session_id (int)
-            - sender_id (int)
+            - role (str)
             - content (str)
             - sent_at (datetime)
 
@@ -397,6 +526,13 @@ def insert_messages(messages: list[dict]):
     if not messages:
         raise ValueError("Messages list is empty.")
 
+    check_roles = [(m["role"] not in ["user", "assistant", "system"]) for m in messages]
+
+    if any(check_roles):
+        raise ValueError(
+            "Invalid role type in messages list. Valid roles are 'user', 'assistant', 'system'."
+        )
+
     try:
         # Establish the connection
         connection = get_connection()
@@ -406,11 +542,11 @@ def insert_messages(messages: list[dict]):
         placeholders = []
         for message in messages:
             placeholders.append(
-                f"({message.session_id}, {message.sender_id}, '{message.content}', {message.sent_at})"
+                f"({message['session_id'] }, '{message['role']}', '{message['content']}', '{message['sent_at']}')"
             )
 
         insert_query = f"""
-        INSERT INTO messages (session_id, sender_id, content, sent_at)
+        INSERT INTO messages (session_id, role, content, sent_at)
         VALUES {', '.join(placeholders)} RETURNING message_id;
         """
 

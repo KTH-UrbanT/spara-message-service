@@ -6,6 +6,7 @@ from service.database import (
     get_users,
     get_selected_user,
     insert_user,
+    insert_empty_user,
     get_selected_session,
     insert_session,
     get_selected_messages,
@@ -18,6 +19,7 @@ import psycopg2.errors
 ##from spara_backend.redis_pub_sub import RedisEventManager
 
 # event_manager = RedisEventManager()
+
 
 class LoginBody(BaseModel):
     email: EmailStr
@@ -32,7 +34,7 @@ class RegisterBody(BaseModel):
 
 class MessageBody(BaseModel):
     session_id: int
-    sender_id: int
+    role: str
     content: str
     sent_at: str
 
@@ -75,6 +77,17 @@ async def register(body: RegisterBody):
         result = insert_user(
             username=body.username, email=body.email, password=body.password
         )
+        return result
+    except HTTPException as e:
+        raise e
+    except Exception as e:
+        raise e
+
+
+@router.post("/user/register/temporary/")
+async def register_temporary_user():
+    try:
+        result = insert_empty_user()
         return result
     except HTTPException as e:
         raise e
@@ -155,7 +168,8 @@ async def get_messages_by_session_id(session_id: int):
 @router.post("/messages/")
 async def create_message(messages: list[MessageBody]):
     try:
-        result = insert_messages(messages=messages)
+        messages_dict = [m.__dict__ for m in messages]
+        result = insert_messages(messages=messages_dict)
         return result
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
