@@ -9,7 +9,7 @@ from service.database import (
 import time
 from datetime import datetime, timezone
 
-EXPIRATION_TIME = 1 * 60  # 300 seconds
+EXPIRATION_TIME = 5 * 60  # 300 seconds
 
 
 def scheduled_thread_read():
