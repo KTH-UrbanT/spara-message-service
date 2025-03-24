@@ -75,7 +75,7 @@ async def send_message(sid, data, user_id, session_id, session_token):
         response_message = None
 
         while retry_count < max_retries:
-            await asyncio.sleep(0.5)  # Check every 0.5 seconds
+            await asyncio.sleep(10)  # Check every 0.5 seconds
             messages = redis_client.lrange(thread_name, 0, -1)
 
             if len(messages) > 1:  # Check if a response message has been added
@@ -122,7 +122,8 @@ async def update_session(session_id, thread_name):
         messages_list = []
     else:
         messages = redis_client.lrange(thread_name, 0, -1)
-        messages_list = [json.loads(message) for message in messages]
+        #messages_list = [json.loads(message) for message in messages]
+        messages_list = [json.loads(message) for message in messages if json.loads(message).get('role') != 'system']
 
     await sio.emit(
         "session_update",
