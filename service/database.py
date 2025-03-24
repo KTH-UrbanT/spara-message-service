@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 import psycopg2
 import os
+import json
 
 
 @dataclass
@@ -538,27 +539,24 @@ def insert_messages(messages: list[dict]):
         connection = get_connection()
         cursor = connection.cursor()
 
-        # Prepare the SQL query
-        placeholders = []
-        for message in messages:
-            placeholders.append(
-                f"({message['session_id'] }, '{message['role']}', '{message['content']}', '{message['sent_at']}')"
-            )
-
-        insert_query = f"""
-        INSERT INTO messages (session_id, role, content, sent_at)
-        VALUES {', '.join(placeholders)} RETURNING message_id;
+        insert_query = """
+            INSERT INTO messages (session_id, role, content, sent_at)
+            VALUES (%s, %s, %s, %s) RETURNING message_id;
         """
 
+        # Prepare data for insertion
+        data = [
+            (msg["session_id"], msg["role"], msg["content"], msg["sent_at"])
+            for msg in messages
+        ]
+
         # Execute the query
-        cursor.execute(insert_query)
+        cursor.executemany(insert_query, data)
 
         # Commit the transaction
         connection.commit()
 
-        # Fetch all results
-        message_ids = cursor.fetchall()
-        return message_ids
+        return
 
     except Exception as e:
         connection.rollback()
