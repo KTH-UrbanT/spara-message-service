@@ -3,7 +3,6 @@ import json
 
 def insert_into_redis_client(conversation_list, redis_client, thread_name):
     print("Inserting into Redis:", thread_name)
-    # TODO: add check if the message is already in the thread
     conversation_list_updated = []
 
     # check if thread exists
@@ -26,7 +25,6 @@ def insert_into_redis_client(conversation_list, redis_client, thread_name):
             ):
                 print("Message not in Redis:", msg["content"])
                 # if not, add it to the thread
-                print(msg["sent_at"].timestamp(), msg_in_redis[0]["timestamp"])
                 conversation_list_updated.append(
                     {
                         "role": msg["role"],

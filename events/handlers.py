@@ -19,10 +19,10 @@ async def connect(sid, environ, auth):
             redis_client=redis_client,
             thread_name=auth["session_token"],
         )
-    if auth and "session_id" in auth:
-        await update_session(
-            session_id=auth["session_id"], thread_name=auth["session_token"]
-        )
+
+    await update_session(
+        session_id=auth.get("session_id"), thread_name=auth.get("session_token")
+    )
 
 
 @sio.event
@@ -118,9 +118,11 @@ async def send_message(sid, data, user_id, session_id, session_token):
 
 
 async def update_session(session_id, thread_name):
-    # TODO: get session messages from Redis and update the session thread
-    messages = redis_client.lrange(thread_name, 0, -1)
-    messages_list = [json.loads(message) for message in messages]
+    if thread_name is None:
+        messages_list = []
+    else:
+        messages = redis_client.lrange(thread_name, 0, -1)
+        messages_list = [json.loads(message) for message in messages]
 
     await sio.emit(
         "session_update",

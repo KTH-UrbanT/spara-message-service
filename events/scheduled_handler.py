@@ -27,7 +27,7 @@ def scheduled_thread_read():
     for key in thread_keys:
         thread_content = redis_client.lrange(key, 0, -1)
         print("THREAD KEY: ", key)
-        print("THREAD CONTENT: ", thread_content)
+        # print("THREAD CONTENT: ", thread_content)
         if last_update_time(thread_content, current_time) is True:
             insert_dict.append(key)
         # insert_dict[key] = read_thread_messages(thread_content)
@@ -64,7 +64,6 @@ def insert_threads(processed_threads):
                 continue  # Skip empty threads
 
             all_sessions = get_all_sessions()
-            print("SESSIONS: ", get_all_sessions())
 
             # Check if the thread exists in the database
             is_session_exists = [
@@ -115,6 +114,8 @@ def insert_threads(processed_threads):
             # Delete thread from Redis after successful processing
             redis_client.delete(thread_id)
             print(f"Thread {thread_id} successfully processed and deleted from Redis.")
+
+            # TODO: send socket emit to update the session
 
             # Update the session is_active status
             update_session(session_id, "NOW()", False)
