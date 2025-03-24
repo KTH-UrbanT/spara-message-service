@@ -1,7 +1,7 @@
 fastapi
 uvicorn
 python-socketio
-psycopg2
+psycopg2-binary
 pydantic[email]
 redis
 schedule
