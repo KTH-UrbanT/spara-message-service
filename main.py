@@ -1,5 +1,5 @@
 from socket_manager.app import app, socket_app
-from config.settings import HOST, PORT
+from config.settings import MS_HOST, MS_PORT
 from events.scheduled_handler import scheduled_thread_read, EXPIRATION_TIME
 from events.handlers import *
 import asyncio
@@ -26,4 +26,4 @@ async def start_scheduler():
 
 
 if __name__ == "__main__":
-    uvicorn.run(socket_app, host=HOST, port=PORT)
+    uvicorn.run(socket_app, host=MS_HOST, port=MS_PORT)

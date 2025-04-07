@@ -3,7 +3,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from service.entrypoints import router
-from config.settings import ALLOWED_ORIGINS
+from config import settings
 import redis
 
 
@@ -27,13 +27,12 @@ app.include_router(router)
 socket_app = socketio.ASGIApp(sio, app)
 
 # Redis connection
-redis_client = redis.StrictRedis(host="127.0.0.1", port=6379, decode_responses=True)
-print("result is here")
+redis_client = redis.Redis(host=settings.REDIS_HOST, port=settings.REDIS_PORT)
 
 
 @app.get("/")
 async def root():
-    return {"message": "WebSocket and Redis app running!"}
+    return {"message": "SocketIO and Redis are running!"}
 
 
 @app.get("/test-redis")
