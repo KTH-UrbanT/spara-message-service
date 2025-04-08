@@ -9,7 +9,7 @@ from service.database import (
 import time
 from datetime import datetime, timezone
 
-EXPIRATION_TIME = 5 * 60  # 300 seconds
+from config.settings import SESSION_EXPIRATION_TIME
 
 
 def scheduled_thread_read():
@@ -47,7 +47,7 @@ def last_update_time(thread_content, current_time):
     if not thread_content:
         return False
 
-    if json.loads(thread_content[-1])["timestamp"] < (current_time - EXPIRATION_TIME):
+    if json.loads(thread_content[-1])["timestamp"] < (current_time - SESSION_EXPIRATION_TIME):
         return True
     return False
 
