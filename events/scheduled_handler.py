@@ -72,7 +72,9 @@ def insert_threads(processed_threads):
                 if session["session_token"] == thread_id
             ]
             print("IS SESSION EXISTS: ", is_session_exists)
-
+            
+            if isinstance(thread_id, bytes):
+                thread_id = thread_id.decode('utf-8')
             user_id = thread_id.split(":")[0]
 
             if not is_session_exists:
