@@ -27,7 +27,7 @@ app.include_router(router)
 socket_app = socketio.ASGIApp(sio, app)
 
 # Redis connection
-redis_client = redis.Redis(host=settings.REDIS_HOST, port=settings.REDIS_PORT)
+redis_client = redis.Redis(host=settings.REDIS_HOST, port=settings.REDIS_PORT , decode_responses=Tru)
 
 
 @app.get("/")
