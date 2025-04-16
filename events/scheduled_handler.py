@@ -5,12 +5,16 @@ from service.database import (
     insert_messages,
     get_all_sessions,
     update_session,
+    get_selected_user , 
+    insert_user
 )
 import time
 from datetime import datetime, timezone
 
 from config.settings import SESSION_EXPIRATION_TIME
-
+import random
+import secrets
+import string
 
 def scheduled_thread_read():
     print("Scheduled job running...")
@@ -76,7 +80,20 @@ def insert_threads(processed_threads):
             if isinstance(thread_id, bytes):
                 thread_id = thread_id.decode('utf-8')
             user_id = thread_id.split(":")[0]
+            try:
+                get_selected_user(column_name="user_id", filter_value=user_id)
+            except :
+                print(f"User ID {user_id} not found. Creating new user.")
+                
+                # Generate dummy user data based on user_id
+                username = f"user_{user_id}"
+                email = f"user_{user_id}@example.com"
+                alphabet = string.ascii_letters + string.digits
+                password = ''.join(secrets.choice(alphabet) for i in range(20))  # You can improve this
 
+                new_user = insert_user(username=username, email=email, password=password)
+                  # update user_id to the new one, just in case
+            print('result here .. user id')
             if not is_session_exists:
                 print(f"Thread {thread_id} does not exist in the database.")
                 session_id = insert_session(user_id, thread_id, True)
