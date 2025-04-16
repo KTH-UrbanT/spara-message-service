@@ -146,3 +146,32 @@ async def create_session(user_id: int, session_token: str, is_active: bool):
     except Exception as e:
         raise e
     
+    
+@router.get("/messages/{session_id}/")
+async def get_messages_by_session_id(session_id: int):
+    try:
+        result = get_selected_messages(
+            column_name="session_id", filter_value=session_id
+        )
+        return result
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except KeyError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        raise e
+
+
+@router.post("/messages/")
+async def create_message(messages: list[MessageBody]):
+    try:
+        messages_dict = [m.__dict__ for m in messages]
+        result = insert_messages(messages=messages_dict)
+        return result
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except psycopg2.errors.ForeignKeyViolation as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        raise e
+    

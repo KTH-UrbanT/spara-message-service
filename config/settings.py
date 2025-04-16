@@ -18,4 +18,4 @@ SQL_DB_NAME = os.getenv("SQL_DB_NAME", "message_store")
 SQL_DB_USER = os.getenv("SQL_DB_USER", "postgres")
 SQL_DB_PASSWORD = os.getenv("SQL_DB_PASSWORD", "postgres")
 
-SESSION_EXPIRATION_TIME = 10  # 300 seconds
+SESSION_EXPIRATION_TIME = 300  # 300 seconds
