@@ -2,6 +2,7 @@ from dataclasses import dataclass
 import psycopg2
 import os
 import json
+from config import settings
 
 
 @dataclass
@@ -35,11 +36,11 @@ class Message:
 
 def get_connection():
     return psycopg2.connect(
-        host=os.environ["DB_HOST"],
-        database=os.environ["DB_NAME"],
-        user=os.environ["DB_USER"],
-        password=os.environ["DB_PASSWORD"],
-        port=os.environ["DB_PORT"],
+        host=os.environ["SQL_DB_HOST"],
+        database=os.environ["SQL_DB_NAME"],
+        user=os.environ["SQL_DB_USER"],
+        password=os.environ["SQL_DB_PASSWORD"],
+        port=os.environ["SQL_DB_PORT"],
     )
 
 

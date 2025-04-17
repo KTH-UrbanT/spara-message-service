@@ -1,6 +1,6 @@
 from socket_manager.app import app, socket_app
-from config.settings import HOST, PORT
-from events.scheduled_handler import scheduled_thread_read, EXPIRATION_TIME
+from config.settings import MS_HOST, MS_PORT, SESSION_EXPIRATION_TIME
+from events.scheduled_handler import scheduled_thread_read
 from events.handlers import *
 import asyncio
 import schedule
@@ -8,7 +8,7 @@ import uvicorn
 
 
 # Schedule the job every 300 seconds
-schedule.every(EXPIRATION_TIME).seconds.do(scheduled_thread_read)
+schedule.every(SESSION_EXPIRATION_TIME).seconds.do(scheduled_thread_read)
 # schedule.every(30).seconds.do(scheduled_thread_read) # For testing purposes
 
 
@@ -26,4 +26,4 @@ async def start_scheduler():
 
 
 if __name__ == "__main__":
-    uvicorn.run(socket_app, host=HOST, port=PORT)
+    uvicorn.run(socket_app, host=MS_HOST, port=MS_PORT)

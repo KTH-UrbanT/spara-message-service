@@ -145,11 +145,8 @@ async def create_session(user_id: int, session_token: str, is_active: bool):
         raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
         raise e
-
-
-# MESSAGE Entrypoints
-
-
+    
+    
 @router.get("/messages/{session_id}/")
 async def get_messages_by_session_id(session_id: int):
     try:
@@ -177,3 +174,4 @@ async def create_message(messages: list[MessageBody]):
         raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
         raise e
+    
