@@ -31,8 +31,6 @@ def scheduled_thread_read():
         # print("THREAD CONTENT: ", thread_content)
         if last_update_time(thread_content, current_time) is True:
             insert_dict.append(key)
-        # insert_dict[key] = read_thread_messages(thread_content)
-        # print("MESSAGES: ", insert_dict[key])
 
     # Insert the messages into the database
     # Check if there are any threads to insert
@@ -82,7 +80,12 @@ def insert_threads(processed_threads):
 
             # Check if the user exists in the database
             try:
-                get_selected_user(column_name="user_id", filter_value=user_id)
+                if user_id.isnumeric():
+                    get_selected_user(column_name="user_id", filter_value=int(user_id))
+                else:
+                    # Invalid user ID format, skip this thread
+                    print(f"Invalid user ID format: {user_id}. Skipping thread.")
+                    continue
             except:
                 # User does not exist, skip this thread
                 print(f"User ID {user_id} not found. Skipping.")
