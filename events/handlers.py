@@ -72,7 +72,7 @@ async def send_message(sid, data, user_id, session_id, session_token):
             }
         )
         redis_client.rpush(thread_name, message_data)
-        await update_session(session_id, thread_name)
+        await update_session(session_id, thread_name, room=sid)
 
         # Notify Redis queue manager to process the message
         event_data = json.dumps({"event": "message_added", "thread_name": thread_name})
@@ -117,7 +117,7 @@ async def send_message(sid, data, user_id, session_id, session_token):
             }
             redis_client.rpush(thread_name, json.dumps(response_message))
 
-        await update_session(session_id, thread_name)
+        await update_session(session_id, thread_name, room=sid)
         # Emit the response back to the client
         print("Redis client:", redis_client)
         await sio.emit("answer_message", response_message, room=sid)
