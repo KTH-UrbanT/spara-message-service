@@ -8,8 +8,12 @@ from service.database import get_selected_messages
 
 @sio.event
 async def connect(sid, environ, auth):
+    if not auth:
+        print("Authentication failed for client: ", sid)
+        return False  # Reject the connection if no auth is provided
+
     print("Client connected:", sid, auth)
-    if auth and "session_token" in auth:
+    if "session_token" in auth and auth.get("session_token"):
         messages_list = get_selected_messages(
             column_name="session_id", filter_value=auth["session_id"]
         )
@@ -20,9 +24,11 @@ async def connect(sid, environ, auth):
             thread_name=auth["session_token"],
         )
 
-    await update_session(
-        session_id=auth.get("session_id"), thread_name=auth.get("session_token")
-    )
+    if "session_id" in auth and "session_token" in auth:
+        # Update the session with the latest messages
+        await update_session(
+            session_id=auth.get("session_id"), thread_name=auth.get("session_token")
+        )
 
 
 @sio.event
@@ -122,8 +128,11 @@ async def update_session(session_id, thread_name):
         messages_list = []
     else:
         messages = redis_client.lrange(thread_name, 0, -1)
-        #messages_list = [json.loads(message) for message in messages]
-        messages_list = [json.loads(message) for message in messages if json.loads(message).get('role') != 'system']
+        messages_list = [
+            json.loads(message)
+            for message in messages
+            if json.loads(message).get("role") != "system"
+        ]
 
     await sio.emit(
         "session_update",
