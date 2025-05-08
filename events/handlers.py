@@ -12,8 +12,11 @@ async def connect(sid, environ, auth):
         print("Authentication failed for client: ", sid)
         return False  # Reject the connection if no auth is provided
 
-    print("Client connected:", sid, auth)
     if "session_token" in auth and auth.get("session_token"):
+        thread_name = auth["session_token"]
+        sio.enter_room(sid, thread_name)
+        print("Client connected:", sid, auth)
+
         messages_list = get_selected_messages(
             column_name="session_id", filter_value=auth["session_id"]
         )
@@ -27,7 +30,9 @@ async def connect(sid, environ, auth):
     if "session_id" in auth and "session_token" in auth:
         # Update the session with the latest messages
         await update_session(
-            session_id=auth.get("session_id"), thread_name=auth.get("session_token")
+            session_id=auth.get("session_id"),
+            thread_name=auth.get("session_token"),
+            room=sid,
         )
 
 
@@ -67,7 +72,7 @@ async def send_message(sid, data, user_id, session_id, session_token):
             }
         )
         redis_client.rpush(thread_name, message_data)
-        await update_session(session_id, thread_name)
+        await update_session(session_id, thread_name, room=sid)
 
         # Notify Redis queue manager to process the message
         event_data = json.dumps({"event": "message_added", "thread_name": thread_name})
@@ -112,7 +117,7 @@ async def send_message(sid, data, user_id, session_id, session_token):
             }
             redis_client.rpush(thread_name, json.dumps(response_message))
 
-        await update_session(session_id, thread_name)
+        await update_session(session_id, thread_name, room=sid)
         # Emit the response back to the client
         print("Redis client:", redis_client)
         await sio.emit("answer_message", response_message, room=sid)
@@ -123,7 +128,7 @@ async def send_message(sid, data, user_id, session_id, session_token):
         await sio.emit("error_message", {"error": str(e)}, room=sid)
 
 
-async def update_session(session_id, thread_name):
+async def update_session(session_id, thread_name, room=None):
     if thread_name is None:
         messages_list = []
     else:
@@ -141,4 +146,5 @@ async def update_session(session_id, thread_name):
             "thread_name": thread_name,
             "messages": messages_list,
         },
+        room=room,
     )
