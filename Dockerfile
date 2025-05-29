@@ -11,6 +11,9 @@ WORKDIR /message-service
 # Copy the requirements file and install dependencies
 COPY requirements.txt .
 RUN pip install --upgrade pip && pip install -r requirements.txt
+# download the curl command for healthchecks
+RUN apt-get update && apt-get install -y curl
+
 
 # Copy the FastAPI application code
 COPY . .
