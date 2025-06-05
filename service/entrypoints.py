@@ -175,25 +175,7 @@ async def create_message(messages: list[MessageBody]):
     except Exception as e:
         raise e
 
-@router.get("/health")
-async def healthcheck():
-    try:
-        conn = psycopg2.connect(
-            dbname=os.getenv("SQL_DB_NAME"),
-            user=os.getenv("SQL_DB_USER"),
-            password=os.getenv("SQL_DB_PASSWORD"),
-            host=os.getenv("SQL_DB_HOST"),
-            port=os.getenv("SQL_DB_PORT"),
-            connect_timeout=1
-        )
-        cur = conn.cursor()
-        cur.execute("SELECT 1")
-        conn.close()
-        return {"status": "ok"}
-    except Exception as e:
-        # Print to logs and show the error message
-        print("Healthcheck DB error:", str(e))
-        raise HTTPException(status_code=500, detail=str(e))
+
 
 
     

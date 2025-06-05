@@ -1,11 +1,14 @@
 import socketio
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+
 
 from service.entrypoints import router
 from config import settings
 import redis
 
+import psycopg2.errors
+import os
 
 # Create Socket.IO server with CORS settings
 sio = socketio.AsyncServer(
@@ -43,3 +46,38 @@ async def test_redis():
         return {"redis_value": value}
     except Exception as e:
         return {"error": str(e)}
+
+@app.get("/health")
+async def healthcheck():
+    # 1) Check Postgres
+    try:
+        conn = psycopg2.connect(
+            dbname=os.getenv("SQL_DB_NAME"),
+            user=os.getenv("SQL_DB_USER"),
+            password=os.getenv("SQL_DB_PASSWORD"),
+            host=os.getenv("SQL_DB_HOST"),
+            port=os.getenv("SQL_DB_PORT"),
+            connect_timeout=1
+        )
+        cur = conn.cursor()
+        cur.execute("SELECT 1")
+        conn.close()
+    except Exception as e:
+        # Print to logs and show the error message
+        print("Healthcheck DB error:", str(e))
+        raise HTTPException(status_code=500, detail=str(e))
+    
+    # 2) Check Redis (via imported redis_client)
+    try:
+        # Write a temporary key
+        redis_client.set("healthcheck_key", "ok", ex=5)  # expires in 5 seconds
+        # Read it back
+        value = redis_client.get("healthcheck_key")
+
+        if value is None or value.decode("utf-8") != "ok":
+            raise Exception("get and set operation failed, redis is unresponsive")
+    except Exception as e:
+        print("Healthcheck Redis error:", str(e))
+        raise HTTPException(status_code=500, detail=f"Redis error: {e}")
+
+    return {"status": "ok"}
