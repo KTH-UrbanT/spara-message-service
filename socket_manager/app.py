@@ -74,7 +74,7 @@ async def healthcheck():
         # Read it back
         value = redis_client.get("healthcheck_key")
 
-        if value is None or value.decode("utf-8") != "ok":
+        if value != "ok":
             raise Exception("get and set operation failed, redis is unresponsive")
     except Exception as e:
         print("Healthcheck Redis error:", str(e))
