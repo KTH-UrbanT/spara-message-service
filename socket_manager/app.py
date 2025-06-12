@@ -65,7 +65,7 @@ async def healthcheck():
     except Exception as e:
         # Print to logs and show the error message
         print("Healthcheck DB error:", str(e))
-        send_health_email("Healthcheck DB error", str(e))
+        send_health_email("Healthcheck DB error", str(e), "moritzgruss@hotmail.se")
         raise HTTPException(status_code=500, detail=str(e))
     
     # 2) Check Redis (via imported redis_client)
@@ -79,7 +79,7 @@ async def healthcheck():
             raise Exception("get and set operation failed, redis is unresponsive")
     except Exception as e:
         print("Healthcheck Redis error:", str(e))
-        send_health_email("Healthcheck Redis error", str(e))
+        send_health_email("Healthcheck Redis error", str(e), "moritzgruss@hotmail.se")
         raise HTTPException(status_code=500, detail=f"Redis error: {e}")
 
     return {"status": "ok"}
