@@ -3,82 +3,172 @@ import asyncio
 import json
 import time
 from service.redis import insert_into_redis_client
-from service.database import get_selected_messages
+from service.database import (
+    get_selected_messages,
+    insert_session,
+    insert_messages,
+    update_session,
+)
+from datetime import datetime, timezone
 
 
 @sio.event
-async def connect(sid, environ, auth):
+async def connect(sid, _, auth):
     if not auth:
         print("Authentication failed for client: ", sid)
         return False  # Reject the connection if no auth is provided
 
-    if "session_token" in auth and auth.get("session_token"):
-        thread_name = auth["session_token"]
-        sio.enter_room(sid, thread_name)
+    if (
+        "session_id" in auth
+        and auth.get("session_id")
+        and "session_id_int" in auth
+        and auth.get("session_id_int")
+    ):
+        session_id = auth["session_id"]
+        sio.enter_room(sid, session_id)
         print("Client connected:", sid, auth)
 
-        messages_list = get_selected_messages(
-            column_name="session_id", filter_value=auth["session_id"]
-        )
+        messages_list = []
+
+        try:
+            messages_list = get_selected_messages(
+                column_name="session_id", filter_value=auth["session_id_int"]
+            )
+        except Exception as e:
+            print("Error fetching messages:", e)
 
         insert_into_redis_client(
             conversation_list=messages_list,
             redis_client=redis_client,
-            thread_name=auth["session_token"],
+            thread_name=session_id,
         )
 
-    if "session_id" in auth and "session_token" in auth:
-        # Update the session with the latest messages
-        await update_session(
-            session_id=auth.get("session_id"),
-            thread_name=auth.get("session_token"),
-            room=sid,
-        )
+    # Update the session with the latest messages
+    await session_updated(session_id=auth.get("session_id"), room=sid)
 
 
 @sio.event
 async def disconnect(sid):
     print("Client disconnected:", sid)
 
+    auth = await sio.get_session(sid) or {}
+    session_id = auth.get("session_id")
+    session_id_int = auth.get("session_id_int")
+
+    if session_id and session_id_int:
+        try:
+            # Remove the session from Redis
+            redis_client.delete(session_id)
+            print(f"Thread {session_id} successfully processed and deleted from Redis.")
+
+            # Set the session as inactive in the database
+            timestamp = datetime.fromtimestamp(time.time(), tz=timezone.utc).isoformat()
+            update_session(
+                session_id=session_id_int,
+                last_access_time=timestamp,
+                is_active=False,
+            )
+
+        except Exception as e:
+            print("Error closing session:", e)
+            await sio.emit("error_message", {"error": str(e)}, room=sid)
+
 
 @sio.event
-async def send_message(sid, data, user_id, session_id, session_token):
+async def establish_session(sid, session_id, session_id_int, user_id):
+    """Establish a session socket id pair for the client and store details in socket."""
+    await sio.save_session(
+        sid,
+        {
+            "session_id": session_id,
+            "session_id_int": session_id_int,
+            "user_id": user_id,
+        },
+    )
+
+
+@sio.event
+async def create_session(sid, message, user_id=None):
+    try:
+        if not user_id:
+            print("User ID is required to create a session.")
+            await sio.emit("error_message", {"error": "User ID is required."}, room=sid)
+            return
+
+        session_id_int = insert_session(
+            user_id=user_id, session_token=sid, is_active=True
+        )
+        session_id = str(sid)
+
+        await sio.emit(
+            "session_created",
+            {
+                "session_id": session_id,
+                "session_id_int": session_id_int,
+                "message": message,
+            },
+            room=sid,
+        )
+        print("New session created with ID:", session_id)
+
+    except Exception as e:
+        print("Error creating session:", e)
+
+
+@sio.event
+async def send_message(sid, data, session_id, session_id_int):
     """
     Handle incoming messages from WebSocket clients and store them in Redis.
     """
-    print("does code reach here")
     print(f"Received message from {sid}: {data}")
 
-    if not session_token:
-        thread_name = f"{user_id}:{sid}"
-    else:
-        thread_name = session_token
-
     try:
-        print("SEND_MESSAGE data:", data, "to thread: ", thread_name)
+        print("SEND_MESSAGE to thread: ", session_id, "session_id_int:", session_id_int)
         if not data:
             await sio.emit(
                 "error_message", {"error": "Message cannot be empty."}, room=sid
             )
             return
 
+        if not session_id:
+            await sio.emit(
+                "error_message", {"error": "Session ID is required."}, room=sid
+            )
+            return
+
+        message_dict = {
+            "content": data,
+            "role": "user",
+            "timestamp": time.time(),
+            "added_to_database": 0,
+        }
         # Add message to Redis thread
-        message_data = json.dumps(
-            {
-                "content": data,
-                "role": "user",
-                "timestamp": time.time(),
-                "added_to_database": 0,
-            }
+        message_data = json.dumps(message_dict)
+
+        # Push the message to the Redis
+        redis_client.rpush(session_id, message_data)
+
+        # Insert message into the database
+        insert_messages(
+            [
+                {
+                    "content": message_dict["content"],
+                    "role": message_dict["role"],
+                    "sent_at": datetime.fromtimestamp(
+                        message_dict["timestamp"], tz=timezone.utc
+                    ).isoformat(),
+                    "session_id": int(session_id_int),
+                }
+            ]
         )
-        redis_client.rpush(thread_name, message_data)
-        await update_session(session_id, thread_name, room=sid)
+
+        await session_updated(session_id, room=sid)
 
         # Notify Redis queue manager to process the message
-        event_data = json.dumps({"event": "message_added", "thread_name": thread_name})
+        event_data = json.dumps({"event": "message_added", "thread_name": session_id})
         redis_client.publish("thread_events", event_data)
 
-        print(f"Message added to Redis for thread: {thread_name}")
+        print(f"Message added to Redis for thread: {session_id}")
 
         # Wait for the reply from the Redis queue
         retry_count = 0
@@ -87,7 +177,7 @@ async def send_message(sid, data, user_id, session_id, session_token):
 
         while retry_count < max_retries:
             await asyncio.sleep(10)  # Check every 0.5 seconds
-            messages = redis_client.lrange(thread_name, 0, -1)
+            messages = redis_client.lrange(session_id, 0, -1)
 
             if len(messages) > 1:  # Check if a response message has been added
                 last_message = json.loads(messages[-1])
@@ -98,10 +188,22 @@ async def send_message(sid, data, user_id, session_id, session_token):
                         "content": last_message.get("content"),
                         "role": "assistant",
                         "status": "success",
-                        "session_id": thread_name,
+                        "session_id": session_id,
                         "timestamp": last_message.get("timestamp"),
-                        "added_to_database": 0,
                     }
+                    # Insert response message into the database
+                    insert_messages(
+                        [
+                            {
+                                "content": response_message["content"],
+                                "role": response_message["role"],
+                                "sent_at": datetime.fromtimestamp(
+                                    response_message["timestamp"], tz=timezone.utc
+                                ).isoformat(),
+                                "session_id": int(session_id_int),
+                            }
+                        ]
+                    )
                     break
 
             retry_count += 1
@@ -111,15 +213,29 @@ async def send_message(sid, data, user_id, session_id, session_token):
                 "content": "Processing timed out. Please try again later.",
                 "role": "assistant",
                 "status": "error",
-                "session_id": thread_name,
+                "session_id": session_id,
                 "timestamp": time.time(),
-                "added_to_database": 0,
             }
-            redis_client.rpush(thread_name, json.dumps(response_message))
+            redis_client.rpush(session_id, json.dumps(response_message))
 
-        await update_session(session_id, thread_name, room=sid)
+            # Insert response message into the database
+            insert_messages(
+                [
+                    {
+                        "content": response_message["content"],
+                        "role": response_message["role"],
+                        "sent_at": datetime.fromtimestamp(
+                            response_message["timestamp"], tz=timezone.utc
+                        ).isoformat(),
+                        "session_id": int(session_id_int),
+                    }
+                ]
+            )
+
+        await session_updated(session_id, room=sid)
+
         # Emit the response back to the client
-        print("Redis client:", redis_client)
+        # print("Redis client:", redis_client) # Debugging line
         await sio.emit("answer_message", response_message, room=sid)
         print("Response sent:", response_message)
 
@@ -128,22 +244,22 @@ async def send_message(sid, data, user_id, session_id, session_token):
         await sio.emit("error_message", {"error": str(e)}, room=sid)
 
 
-async def update_session(session_id, thread_name, room=None):
-    if thread_name is None:
+async def session_updated(session_id, room=None):
+    if session_id is None:
         messages_list = []
     else:
-        messages = redis_client.lrange(thread_name, 0, -1)
+        messages = redis_client.lrange(session_id, 0, -1)
         messages_list = [
             json.loads(message)
             for message in messages
             if json.loads(message).get("role") != "system"
         ]
+        # print("Messages in Redis for session:", session_id, messages_list) # Debugging line
 
     await sio.emit(
-        "session_update",
+        "session_updated",
         {
             "session_id": session_id,
-            "thread_name": thread_name,
             "messages": messages_list,
         },
         room=room,
