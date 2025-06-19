@@ -4,5 +4,4 @@ python-socketio
 psycopg2-binary
 pydantic[email]
 redis
-schedule
 dotenv
