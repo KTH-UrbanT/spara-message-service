@@ -569,3 +569,37 @@ def insert_messages(messages: list[dict]):
             cursor.close()
         if connection:
             connection.close()
+
+# DATABASE FUNCTIONS - ratings
+def insert_rating(user_id, rating, message):
+    userId = user_id
+    if user_id == 1:
+        userId = 'NULL'
+
+
+    try:
+        connection = get_connection()
+        cursor = connection.cursor()
+
+        insert_query = f"""
+            INSERT INTO ratings (user_id, rating, message)
+            VALUES ({userId}, {rating}, '{message}') RETURNING rating_id
+        """
+
+        cursor.execute(insert_query)
+
+        connection.commit()
+
+        rating_id = cursor.fetchone()[0]
+        return rating_id
+
+
+    except Exception as e:
+        connection.rollback()
+        raise e
+    
+    finally:
+        if cursor:
+            cursor.close()
+        if connection:
+            connection.close()

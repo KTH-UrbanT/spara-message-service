@@ -12,6 +12,7 @@ from service.database import (
     get_selected_messages,
     insert_messages,
     Message,
+    insert_rating,
 )
 from pydantic import BaseModel, EmailStr
 import psycopg2.errors
@@ -37,6 +38,11 @@ class MessageBody(BaseModel):
     role: str
     content: str
     sent_at: str
+
+class RatingBody(BaseModel):
+    userId: int
+    rating: float
+    message: str
 
 
 # Create a router instance
@@ -175,3 +181,11 @@ async def create_message(messages: list[MessageBody]):
     except Exception as e:
         raise e
     
+@router.post("/rating/")
+async def send_rating(ratingbody: RatingBody):
+    try:
+        print(f"rating {ratingbody.rating} for {ratingbody.message}")
+        rating_id = insert_rating(ratingbody.userId, ratingbody.rating, ratingbody.message)
+        print(f"{rating_id} inserted into database")
+    except Exception as e:
+        raise e
