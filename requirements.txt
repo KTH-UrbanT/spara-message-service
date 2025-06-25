@@ -6,3 +6,5 @@ pydantic[email]
 redis
 schedule
 dotenv
+pytest
+pytest-asyncio
