@@ -123,8 +123,7 @@ async def send_message(sid, data, session_id, session_id_int):
     print(f"Received message from {sid}: {data}")
 
     try:
-        print("SEND_MESSAGE to thread: ", session_id, "session_id_int:", session_id_int)
-        if not data:
+        if not data or not data.strip():
             await sio.emit(
                 "error_message", {"error": "Message cannot be empty."}, room=sid
             )
@@ -135,6 +134,14 @@ async def send_message(sid, data, session_id, session_id_int):
                 "error_message", {"error": "Session ID is required."}, room=sid
             )
             return
+
+        if not session_id_int:
+            await sio.emit(
+                "error_message", {"error": "Session ID integer is required."}, room=sid
+            )
+            return
+
+        print("SEND_MESSAGE to thread: ", session_id, "session_id_int:", session_id_int)
 
         message_dict = {
             "content": data,
@@ -191,24 +198,12 @@ async def send_message(sid, data, session_id, session_id_int):
                         "session_id": session_id,
                         "timestamp": last_message.get("timestamp"),
                     }
-                    # Insert response message into the database
-                    insert_messages(
-                        [
-                            {
-                                "content": response_message["content"],
-                                "role": response_message["role"],
-                                "sent_at": datetime.fromtimestamp(
-                                    response_message["timestamp"], tz=timezone.utc
-                                ).isoformat(),
-                                "session_id": int(session_id_int),
-                            }
-                        ]
-                    )
                     break
 
             retry_count += 1
 
         if not response_message:
+            # If no response after retries, send a timeout message
             response_message = {
                 "content": "Processing timed out. Please try again later.",
                 "role": "assistant",
@@ -218,19 +213,19 @@ async def send_message(sid, data, session_id, session_id_int):
             }
             redis_client.rpush(session_id, json.dumps(response_message))
 
-            # Insert response message into the database
-            insert_messages(
-                [
-                    {
-                        "content": response_message["content"],
-                        "role": response_message["role"],
-                        "sent_at": datetime.fromtimestamp(
-                            response_message["timestamp"], tz=timezone.utc
-                        ).isoformat(),
-                        "session_id": int(session_id_int),
-                    }
-                ]
-            )
+        # Insert response message into the database
+        insert_messages(
+            [
+                {
+                    "content": response_message["content"],
+                    "role": response_message["role"],
+                    "sent_at": datetime.fromtimestamp(
+                        response_message["timestamp"], tz=timezone.utc
+                    ).isoformat(),
+                    "session_id": int(session_id_int),
+                }
+            ]
+        )
 
         await session_updated(session_id, room=sid)
 
