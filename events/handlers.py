@@ -13,7 +13,21 @@ from datetime import datetime, timezone
 
 
 @sio.event
-async def connect(sid, _, auth):
+async def connect(sid, environ, auth):
+    """Handle client connection and authenticate the session.
+
+    This function is called when a client connects to the WebSocket.
+    It checks the authentication details provided by the client, enters the
+    client into the appropriate session room, and retrieves the messages
+    associated with that session from the database. It also inserts the
+    messages into the Redis client for real-time updates.
+
+    Args:
+        sid (str): The socket session ID of the client.
+        environ (dict): The environment variables provided by the client.
+        auth (dict): Authentication details provided by the client, including
+            session_id and session_id_int.
+    """
     if not auth:
         print("Authentication failed for client: ", sid)
         return False  # Reject the connection if no auth is provided
@@ -49,6 +63,15 @@ async def connect(sid, _, auth):
 
 @sio.event
 async def disconnect(sid):
+    """Handle client disconnection and clean up session data.
+
+    This function is called when a client disconnects from the WebSocket.
+    It removes the session from Redis, updates the session status in the
+    database as inactive.
+
+    Args:
+        sid (str): The socket session ID of the client.
+    """
     print("Client disconnected:", sid)
 
     auth = await sio.get_session(sid) or {}
@@ -76,7 +99,14 @@ async def disconnect(sid):
 
 @sio.event
 async def establish_session(sid, session_id, session_id_int, user_id):
-    """Establish a session socket id pair for the client and store details in socket."""
+    """Establish a session socket id pair for the client and store details in socket.
+
+    Args:
+        sid (str): The socket session ID of the client.
+        session_id (str): The session ID for the current conversation.
+        session_id_int (int): The integer session ID from DB.
+        user_id (str): The ID of the user client.
+    """
     await sio.save_session(
         sid,
         {
@@ -89,6 +119,17 @@ async def establish_session(sid, session_id, session_id_int, user_id):
 
 @sio.event
 async def create_session(sid, message, user_id=None):
+    """Create a new session for the user and store it in the database.
+
+    This function is called when a new session is initiated by the client
+    and it creates a new session in the database, associates it with the
+    provided user ID, and emits a confirmation message back to the client.
+
+    Args:
+        sid (str): The socket session ID of the client.
+        message (str): The initial message or context for the session.
+        user_id (str, optional): The ID of the user creating the session.
+    """
     try:
         if not user_id:
             print("User ID is required to create a session.")
@@ -117,8 +158,18 @@ async def create_session(sid, message, user_id=None):
 
 @sio.event
 async def send_message(sid, data, session_id, session_id_int):
-    """
-    Handle incoming messages from WebSocket clients and store them in Redis.
+    """Handle incoming messages from WebSocket clients.
+
+    This function processes messages sent by clients, adds them to the Redis
+    queue, and sends the messages to the language model in order to generate
+    responses. Inserts the messages into the database and emits the response,
+    back to the client.
+
+    Args:
+        sid (str): The socket session ID of the client.
+        data (str): The message content sent by the client.
+        session_id (str): The session ID for the current conversation.
+        session_id_int (int): The integer session ID from DB.
     """
     print(f"Received message from {sid}: {data}")
 
@@ -240,6 +291,17 @@ async def send_message(sid, data, session_id, session_id_int):
 
 
 async def session_updated(session_id, room=None):
+    """Emit to client about session updates.
+
+    This function retrieves the messages from Redis for the given session ID,
+    filters out system messages, and emits the updated session messages
+    back to the client. If the session ID is None, it initializes an empty
+    messages list.
+
+    Args:
+        session_id (str): Session ID to update.
+        room (str, optional): Room ID to emit. Defaults to None.
+    """
     if session_id is None:
         messages_list = []
     else:

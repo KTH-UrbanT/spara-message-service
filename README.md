@@ -25,3 +25,7 @@ Once the dependencies are installed, start the server using the following comman
 ```
 uvicorn main:socket_app --reload
 ```
+
+## Running ReDoc
+
+To run the ReDoc documentation for the API, you can run the server locally as explained in the "Running Locally" section. Then, navigate to `.../redoc` in your web browser to view the API documentation.
