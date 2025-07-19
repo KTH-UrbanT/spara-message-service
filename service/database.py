@@ -571,7 +571,7 @@ def insert_messages(messages: list[dict]):
             connection.close()
 
 # DATABASE FUNCTIONS - ratings
-def insert_rating(user_id, rating, message):
+def insert_rating(user_id, rating, message, version):
     userId = user_id
     if user_id == 1:
         userId = 'NULL'
@@ -582,8 +582,8 @@ def insert_rating(user_id, rating, message):
         cursor = connection.cursor()
 
         insert_query = f"""
-            INSERT INTO ratings (user_id, rating, message)
-            VALUES ({userId}, {rating}, '{message}') RETURNING rating_id
+            INSERT INTO ratings (user_id, rating, message, version)
+            VALUES ({userId}, {rating}, '{message}', '{version}') RETURNING rating_id
         """
 
         cursor.execute(insert_query)
