@@ -1,14 +1,7 @@
-# Flask - for web server
-Flask==3.0.2
-
-# SocketIO - for websockets
-Flask-SocketIO==5.3.6
-
-# Dotenv - for environment variables
-python-dotenv==1.0.1
-
-# Invoke - for task management
-invoke==2.2.0
-
-# Celery
-celery=5.3.6
+fastapi
+uvicorn
+python-socketio
+psycopg2-binary
+pydantic[email]
+redis
+dotenv

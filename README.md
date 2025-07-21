@@ -1,58 +1,31 @@
-# SPARA Web Server
+# SPARA server
 
-## First Time Setup
+SPARA backend is based on FastAPI. Normally it's launched in container as one of the integral parts of SPARA.
+
+## Running Locally
+
+To run the server locally, first ensure you have all necessary dependencies installed. You can install the required Python packages using `pip`:
 
 ```
-# Create the venv virtual environment
-python -m venv .venv
-
-# On MacOS, WSL, Linux
-source .venv/bin/activate
-
-# On Windows
-.\.venv\Scripts\activate
-
-# Install dependencies
 pip install -r requirements.txt
-
-# Initialize the database
-flask --app app.web init-db
 ```
 
-## Running the app
-
-### To run the Python server
-
-Open a new terminal window and load the virtual environment:
+Then you need to export .env variables such as:
 
 ```
-# On MacOS, WSL, Linux
-source .venv/bin/activate
-
-# On Windows
-.\.venv\Scripts\activate
+export DB_USER=
+export DB_PASSWORD=
+export DB_HOST=
+export DB_PORT=
+export DB_NAME=
 ```
 
-Then:
+Once the dependencies are installed, start the server using the following command:
 
 ```
-inv dev
+uvicorn main:socket_app --reload
 ```
 
-### To reset the database
+## Running ReDoc
 
-Open a new terminal window and create a new virtual environment:
-
-```
-# On MacOS, WSL, Linux
-source .venv/bin/activate
-
-# On Windows
-.\.venv\Scripts\activate
-```
-
-Then:
-
-```
-flask --app app.web init-db
-```
+To run the ReDoc documentation for the API, you can run the server locally as explained in the "Running Locally" section. Then, navigate to `.../redoc` in your web browser to view the API documentation.
