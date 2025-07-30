@@ -130,21 +130,44 @@ def insert_empty_user() -> int:
             connection.close()
 
 
-def get_users() -> list[User]:
+def get_users(filter: str = "all") -> list[User]:
     """Select all rows from the users table
+
+    Args:
+        filter ('all' | 'regular' | 'temporary'): Filter type for users.
+            - 'all': Get all users
+            - 'regular': Get regular users (with username and email)
+            - 'temporary': Get temporary users (without username and email)
 
     Returns:
         list: List of users dict
     """
     try:
+        # Validate filter type
+        if filter not in ["all", "regular", "temporary"]:
+            raise ValueError(
+                "Invalid filter type. Use 'all', 'regular', or 'temporary'."
+            )
+
         # Establish the connection
         connection = get_connection()
         cursor = connection.cursor()
 
-        # SQL query to fetch all users
-        select_query = (
-            "SELECT user_id, username, email, created_at, last_logged_in FROM users;"
-        )
+        if filter == "regular":
+            # SQL query to fetch regular users
+            select_query = (
+                "SELECT user_id, username, email, created_at, last_logged_in FROM users "
+                "WHERE username IS NOT NULL AND email IS NOT NULL;"
+            )
+        elif filter == "temporary":
+            # SQL query to fetch temporary users
+            select_query = (
+                "SELECT user_id, created_at, last_logged_in FROM users "
+                "WHERE username IS NULL OR email IS NULL;"
+            )
+        elif filter == "all":
+            # SQL query to fetch all users
+            select_query = "SELECT user_id, username, email, created_at, last_logged_in FROM users;"
 
         # Execute the query
         cursor.execute(select_query)
@@ -178,7 +201,9 @@ def get_users() -> list[User]:
             connection.close()
 
 
-def get_selected_user(column_name: str, filter_value: str | int) -> User:
+def get_selected_user(
+    column_name: str, filter_value: str | int, include_password: bool = False
+) -> User:
     """Select user from filtered by selected column.
 
     Args:
@@ -231,10 +256,13 @@ def get_selected_user(column_name: str, filter_value: str | int) -> User:
             "user_id": user_row[0],
             "username": user_row[1],
             "email": user_row[2],
-            # "password": user_row[3],
             "created_at": user_row[4],
             "last_logged_in": user_row[5],
         }
+
+        # Include password hash if requested
+        if include_password:
+            user_dict["password_hash"] = user_row[3]
 
         return user_dict
 
