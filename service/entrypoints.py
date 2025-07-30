@@ -185,8 +185,7 @@ async def create_message(messages: list[MessageBody]):
 async def send_rating(ratingbody: RatingBody):
     version=os.getenv("VERSION_NUMBER", "0.5.0")
     try:
-        print(f"rating {ratingbody.rating} for {ratingbody.message}")
         rating_id = insert_rating(ratingbody.userId, ratingbody.rating, ratingbody.message, version)
-        print(f"{rating_id} inserted into database")
+        print(f"Rating with ID {rating_id} inserted into database")
     except Exception as e:
         raise e
