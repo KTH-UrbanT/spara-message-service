@@ -5,3 +5,8 @@ psycopg2-binary
 pydantic[email]
 redis
 dotenv
+passlib[bcrypt]
+slowapi
+python-multipart
+bcrypt==3.2.0
+PyJWT>=2.0.0
