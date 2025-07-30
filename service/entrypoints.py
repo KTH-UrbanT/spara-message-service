@@ -128,7 +128,7 @@ async def login(request: Request, form_data: OAuth2PasswordRequestForm = Depends
 
 @router.post("/user/login/temporary/", tags=["users"])
 @limiter.limit("10/minute")
-async def login_temporary_user(temp_user_id: int):
+async def login_temporary_user(request: Request, temp_user_id: int):
     """Login endpoint for temporary users.
     This endpoint creates a signed JWT token for a temporary user.
     Args:
@@ -174,7 +174,7 @@ async def register(request: Request, body: RegisterBody):
 
 @router.post("/user/register/temporary/", tags=["users"])
 @limiter.limit("10/minute")
-async def register_temporary_user():
+async def register_temporary_user(request: Request):
     try:
         result = insert_empty_user()
         return result
