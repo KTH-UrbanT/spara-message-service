@@ -370,10 +370,6 @@ def get_selected_session(
         # Fetch all results
         session_rows = cursor.fetchall()
 
-        # If still no user, raise an error
-        if not session_rows:
-            raise KeyError("Session not found for given filters.")
-
         # Convert the results to a list of dictionaries
         session_list = []
         for session in session_rows:
@@ -477,10 +473,6 @@ def get_selected_messages(column_name: str, filter_value: int) -> list[Message]:
         cursor.execute(select_query)
         # Fetch all results
         message_rows = cursor.fetchall()
-
-        # If still no user, raise an error
-        if not message_rows:
-            raise KeyError("Message not found for given filters.")
 
         # Convert the results to a list of dictionaries
         message_list = []
