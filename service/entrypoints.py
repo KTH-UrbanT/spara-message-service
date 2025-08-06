@@ -43,6 +43,7 @@ class RatingBody(BaseModel):
     userId: int
     rating: float
     message: str
+    sessionIdInt: int
 
 
 # Create a router instance
@@ -183,7 +184,11 @@ async def create_message(messages: list[MessageBody]):
     
 @router.post("/rating/")
 async def send_rating(ratingbody: RatingBody):
-    version=os.getenv("VERSION_NUMBER", "0.5.0")
+    #version=os.getenv("VERSION_NUMBER", "0.5.0")
+    if ratingbody.sessionIdInt % 2 == 0:
+        version = "GROUP-A"
+    else:
+        version = "GROUP-B"
     try:
         rating_id = insert_rating(ratingbody.userId, ratingbody.rating, ratingbody.message, version)
         print(f"Rating with ID {rating_id} inserted into database")

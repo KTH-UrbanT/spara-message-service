@@ -567,7 +567,7 @@ def insert_rating(user_id, rating, message, version):
     userId = user_id
     if user_id == 1:
         userId = 'NULL'
-
+    print(version)
 
     try:
         connection = get_connection()
