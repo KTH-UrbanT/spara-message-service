@@ -12,6 +12,9 @@ from service.database import (
     get_selected_messages,
     insert_messages,
     Message,
+    insert_rating,
+    check_rating_exists,
+    update_rating,
 )
 from pydantic import BaseModel, EmailStr
 import psycopg2.errors
@@ -37,6 +40,12 @@ class MessageBody(BaseModel):
     role: str
     content: str
     sent_at: str
+
+class RatingBody(BaseModel):
+    userId: int
+    rating: float
+    message: str
+    sessionIdInt: int
 
 
 # Create a router instance
@@ -175,3 +184,29 @@ async def create_message(messages: list[MessageBody]):
     except Exception as e:
         raise e
     
+@router.post("/rating/")
+async def send_rating(ratingbody: RatingBody):
+    # version=os.getenv("VERSION_NUMBER", "0.5.0")
+    messages = await get_messages_by_session_id(ratingbody.sessionIdInt)
+    # Filter out the message with the same content as ratingbody.message
+    target_message = next((m for m in messages if m["content"] == ratingbody.message), None)
+    if not target_message:
+        raise HTTPException(status_code=404, detail="Message not found for rating.")
+    message_id = target_message["message_id"]
+    rating_id = check_rating_exists( message_id)
+    if ratingbody.sessionIdInt % 2 == 0:
+        version = "GROUP-A"
+    else:
+        version = "GROUP-B"
+    try:
+        if rating_id:
+            print(f"Rating already exists for message_id {message_id}, updating existing rating.")
+            # Update the existing rating
+            update_rating(rating_id, ratingbody.rating)
+            return {"rating_id": rating_id, "message_id": message_id}
+        else:
+            rating_id = insert_rating(ratingbody.userId, ratingbody.rating, message_id, version)
+            print(f"Rating with ID {rating_id} inserted into database for message_id {message_id}")
+            return {"rating_id": rating_id, "message_id": message_id}
+    except Exception as e:
+        raise e

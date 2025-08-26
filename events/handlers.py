@@ -117,7 +117,7 @@ async def establish_session(sid, session_id, session_id_int, user_id):
     )
 
 
-@sio.event
+@sio.event  #här ska det fixas
 async def create_session(sid, message, user_id=None):
     """Create a new session for the user and store it in the database.
 
@@ -223,7 +223,7 @@ async def send_message(sid, data, session_id, session_id_int):
         await session_updated(session_id, room=sid)
 
         # Notify Redis queue manager to process the message
-        event_data = json.dumps({"event": "message_added", "thread_name": session_id})
+        event_data = json.dumps({"event": "message_added", "session_id_int": session_id_int, "thread_name": session_id })
         redis_client.publish("thread_events", event_data)
 
         print(f"Message added to Redis for thread: {session_id}")

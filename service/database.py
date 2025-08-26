@@ -561,3 +561,88 @@ def insert_messages(messages: list[dict]):
             cursor.close()
         if connection:
             connection.close()
+
+# DATABASE FUNCTIONS - ratings
+def insert_rating(user_id, rating, message, version):
+    userId = user_id
+    if user_id == 1:
+        userId = 'NULL'
+    print(version)
+
+    try:
+        connection = get_connection()
+        cursor = connection.cursor()
+
+        insert_query = f"""
+            INSERT INTO ratings (user_id, rating, message, version)
+            VALUES ({userId}, {rating}, '{message}', '{version}') RETURNING rating_id
+        """
+
+        cursor.execute(insert_query)
+
+        connection.commit()
+
+        rating_id = cursor.fetchone()[0]
+        return rating_id
+
+
+    except Exception as e:
+        connection.rollback()
+        raise e
+    
+    finally:
+        if cursor:
+            cursor.close()
+        if connection:
+            connection.close()
+
+def check_rating_exists(message_id):
+    try:
+        connection = get_connection()
+        cursor = connection.cursor()
+
+        select_query = f"""
+            SELECT rating_id FROM ratings WHERE message = '{message_id}'
+        """
+
+        cursor.execute(select_query)
+        result = cursor.fetchone()
+
+        if result is not None:
+            return result[0]  # Return the rating_id
+        else:
+            return None
+
+    except Exception as e:
+        raise e
+
+    finally:
+        if cursor:
+            cursor.close()
+        if connection:
+            connection.close()
+
+def update_rating(rating_id, rating):
+    try:
+        connection = get_connection()
+        cursor = connection.cursor()
+
+        update_query = f"""
+            UPDATE ratings
+            SET rating = {rating}
+            WHERE rating_id = {rating_id}
+        """
+
+        cursor.execute(update_query)
+
+        connection.commit()
+
+    except Exception as e:
+        connection.rollback()
+        raise e
+
+    finally:
+        if cursor:
+            cursor.close()
+        if connection:
+            connection.close()
