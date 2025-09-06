@@ -12,6 +12,7 @@ from service.database import (
     get_selected_user,
     insert_user,
     insert_empty_user,
+    update_user,
     get_selected_session,
     insert_session,
     get_selected_messages,
@@ -26,6 +27,10 @@ from service.database import (
 class LoginBody(BaseModel):
     email: EmailStr
     password: str
+
+
+class TemporaryUserLoginBody(BaseModel):
+    temp_user_id: int
 
 
 class RegisterBody(BaseModel):
@@ -63,6 +68,7 @@ limiter = Limiter(key_func=get_remote_address)
 @router.get("/users/", tags=["users"])
 async def get_all_users(auth: dict = Depends(auth_service.get_token_data)):
     try:
+        # TODO: Only allow admin users to access this endpoint. After implementing roles.
         if auth.get("temporary_user"):
             raise HTTPException(
                 status_code=403,
@@ -84,6 +90,7 @@ async def get_user_by_user_id(
     user_id: int, auth: dict = Depends(auth_service.get_token_data)
 ):
     try:
+        _ensure_user(user_id, auth)
         result = get_selected_user(column_name="user_id", filter_value=user_id)
         return result
     except ValueError as e:
@@ -112,7 +119,7 @@ async def login(request: Request, form_data: OAuth2PasswordRequestForm = Depends
         )
 
     # Verify the provided password against the stored hash
-    if not verify_password(form_data.password, user["password_hash"]):
+    if not _verify_password(form_data.password, user["password_hash"]):
         raise HTTPException(
             status_code=401,
             detail="Incorrect email or password.",
@@ -123,23 +130,56 @@ async def login(request: Request, form_data: OAuth2PasswordRequestForm = Depends
         user_id=user["user_id"], email=user["email"], temporary_user=False
     )
 
-    return {"access_token": token, "token_type": "bearer", "user_id": user["user_id"]}
+    return {
+        "access_token": token,
+        "token_type": "bearer",
+        "user_id": user["user_id"],
+        "username": user["username"],
+        "email": user["email"],
+        "temporary_user": False,
+    }
 
 
 @router.post("/user/login/temporary/", tags=["users"])
 @limiter.limit("10/minute")
-async def login_temporary_user(request: Request, temp_user_id: int):
+async def login_temporary_user(request: Request, data: TemporaryUserLoginBody):
     """Login endpoint for temporary users.
     This endpoint creates a signed JWT token for a temporary user.
     Args:
         temp_user_id (int): The ID of the temporary user.
     Returns:
         dict: A dictionary containing the access token, token type, user ID, and a flag indicating it's a temporary user.
+    Raises:
+        HTTPException: If the user is not a temporary user or doesn't exist.
     """
-    # Create a signed JWT token
+
+    try:
+        # Fetch user by user_id to validate it exists and check if it's temporary
+        temp_user_id = data.temp_user_id
+        user = get_selected_user(
+            column_name="user_id", filter_value=temp_user_id, include_password=False
+        )
+
+        # Check if this is actually a temporary user
+        # Assuming temporary users don't have email/username/password_hash
+        if user.get("email") or user.get("username") or user.get("password_hash"):
+            raise HTTPException(
+                status_code=403,
+                detail="Cannot login as temporary user: This is a regular user account with credentials.",
+            )
+
+    except KeyError:
+        # User doesn't exist
+        raise HTTPException(
+            status_code=404,
+            detail="Temporary user not found.",
+        )
+
+    # Create a signed JWT token for the temporary user
     token = auth_service.create_token(
         user_id=temp_user_id, email="", temporary_user=True
     )
+
     return {
         "access_token": token,
         "token_type": "bearer",
@@ -151,17 +191,17 @@ async def login_temporary_user(request: Request, temp_user_id: int):
 @router.post("/user/register/", tags=["users"])
 @limiter.limit("10/minute")
 async def register(request: Request, body: RegisterBody):
-    users = get_users(filter="regular")
-
-    # Check for existing email
-    if any(u["email"].lower() == body.email.lower() for u in users if u["email"]):
-        raise HTTPException(status_code=400, detail="Email already registered.")
-
-    # Hash the password
-    hashed_pw = get_password_hash(body.password)
-
-    # Insert new user
     try:
+        users = get_users(filter="regular")
+
+        # Check for existing email
+        if any(u["email"].lower() == body.email.lower() for u in users if u["email"]):
+            raise HTTPException(status_code=400, detail="Email already registered.")
+
+        # Hash the password
+        hashed_pw = _get_password_hash(body.password)
+
+        # Insert new user
         new_user_id = insert_user(
             username=body.username, email=body.email, password=hashed_pw
         )
@@ -184,6 +224,34 @@ async def register_temporary_user(request: Request):
         raise e
 
 
+@router.post("/user/register/temporary-to-regular/{user_id}/", tags=["users"])
+@limiter.limit("10/minute")
+async def register_temporary_user_to_regular(request: Request, body: RegisterBody):
+    try:
+        users = get_users(filter="regular")
+
+        # Check for existing email
+        if any(u["email"].lower() == body.email.lower() for u in users if u["email"]):
+            raise HTTPException(status_code=400, detail="Email already registered.")
+
+        # Hash the password
+        hashed_pw = _get_password_hash(body.password)
+
+        update_user(
+            user_id=body.user_id,
+            username=body.username,
+            email=body.email,
+            password=hashed_pw,
+        )
+
+        result = {"user_id": body.user_id, "message": "User updated successfully."}
+        return result
+    except HTTPException as e:
+        raise e
+    except Exception as e:
+        raise e
+
+
 # SESSION Entrypoints
 
 
@@ -194,6 +262,8 @@ async def get_session_by_user_id(
     auth: dict = Depends(auth_service.get_token_data),
 ):
     try:
+        _ensure_user(user_id, auth)
+
         result = get_selected_session(
             column_name="user_id",
             filter_value=user_id,
@@ -216,6 +286,8 @@ async def create_session(
     auth: dict = Depends(auth_service.get_token_data),
 ):
     try:
+        _ensure_user(user_id, auth)
+
         result = insert_session(
             user_id=user_id, session_token=session_token, is_active=is_active
         )
@@ -234,6 +306,16 @@ async def get_messages_by_session_id(
     session_id: int, auth: dict = Depends(auth_service.get_token_data)
 ):
     try:
+        session = get_selected_session(
+            column_name="session_id", filter_value=session_id
+        )
+        if not session:
+            raise HTTPException(
+                status_code=404, detail=f"Session {session_id} not found."
+            )
+        user_id = session[0]["user_id"]
+        _ensure_user(user_id, auth)
+
         result = get_selected_messages(
             column_name="session_id", filter_value=session_id
         )
@@ -251,6 +333,17 @@ async def create_message(
     messages: list[MessageBody], auth: dict = Depends(auth_service.get_token_data)
 ):
     try:
+        for m in messages:
+            session = get_selected_session(
+                column_name="session_id", filter_value=m.session_id
+            )
+            if not session:
+                raise HTTPException(
+                    status_code=404, detail=f"Session {m.session_id} not found."
+                )
+            user_id = session[0]["user_id"]
+            _ensure_user(user_id, auth)
+
         messages_dict = [m.__dict__ for m in messages]
         result = insert_messages(messages=messages_dict)
         return result
@@ -262,10 +355,16 @@ async def create_message(
         raise e
 
 
-@router.post("/rating/")
-async def send_rating(ratingbody: RatingBody):
+@router.post("/rating/", tags=["ratings"])
+async def send_rating(
+    ratingbody: RatingBody, auth: dict = Depends(auth_service.get_token_data)
+):
+    _ensure_user(ratingbody.userId, auth)
+
     # version=os.getenv("VERSION_NUMBER", "0.5.0")
-    messages = await get_messages_by_session_id(ratingbody.sessionIdInt)
+    messages = await get_messages_by_session_id(ratingbody.sessionIdInt, auth)
+
+    # TODO: change message lookup to use message_id instead of content
     # Filter out the message with the same content as ratingbody.message
     target_message = next(
         (m for m in messages if m["content"] == ratingbody.message), None
@@ -301,9 +400,17 @@ async def send_rating(ratingbody: RatingBody):
 # Helpers
 
 
-def get_password_hash(password: str) -> str:
+def _get_password_hash(password: str) -> str:
+    """Hash a password for storing."""
     return pwd_context.hash(password)
 
 
-def verify_password(plain: str, hashed: str) -> bool:
+def _verify_password(plain: str, hashed: str) -> bool:
+    """Verify a plain password against a hashed password."""
     return pwd_context.verify(plain, hashed)
+
+
+def _ensure_user(resource_owner_id: int, auth_user: dict):
+    """Ensure that the authenticated user is the resource owner else raise HTTP 403 Forbidden error."""
+    if auth_user["user_id"] != resource_owner_id:
+        raise HTTPException(status_code=403, detail="Forbidden")

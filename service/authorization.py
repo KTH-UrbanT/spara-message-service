@@ -23,7 +23,7 @@ class AuthorizationService:
 
     def create_token(self, user_id: int, email: str, temporary_user: bool) -> str:
         now: datetime = datetime.now(tz=timezone.utc)
-        expire: datetime = now + timedelta(seconds=self.JWT_EXPIRATION_TIME)
+        expire: datetime = now + timedelta(minutes=self.JWT_EXPIRATION_TIME)
 
         payload: Dict[str, Any] = {
             "user_id": user_id,
