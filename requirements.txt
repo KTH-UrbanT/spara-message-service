@@ -10,3 +10,6 @@ slowapi
 python-multipart
 bcrypt==3.2.0
 PyJWT>=2.0.0
+httpx==0.28.1 # for testclient in fastapi
+pytest>=9.0.1
+pytest-asyncio>=1.3.0
