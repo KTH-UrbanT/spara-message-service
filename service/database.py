@@ -53,7 +53,7 @@ def insert_user(username: str, email: str, password: str) -> int:
     Args:
         username (str): Username
         email (str): Email
-        password (str): Password
+        password (str): Hashed password
 
     Returns:
         int: user_id of new user
@@ -130,21 +130,44 @@ def insert_empty_user() -> int:
             connection.close()
 
 
-def get_users() -> list[User]:
+def get_users(filter: str = "all") -> list[User]:
     """Select all rows from the users table
+
+    Args:
+        filter ('all' | 'regular' | 'temporary'): Filter type for users.
+            - 'all': Get all users
+            - 'regular': Get regular users (with username and email)
+            - 'temporary': Get temporary users (without username and email)
 
     Returns:
         list: List of users dict
     """
     try:
+        # Validate filter type
+        if filter not in ["all", "regular", "temporary"]:
+            raise ValueError(
+                "Invalid filter type. Use 'all', 'regular', or 'temporary'."
+            )
+
         # Establish the connection
         connection = get_connection()
         cursor = connection.cursor()
 
-        # SQL query to fetch all users
-        select_query = (
-            "SELECT user_id, username, email, created_at, last_logged_in FROM users;"
-        )
+        if filter == "regular":
+            # SQL query to fetch regular users
+            select_query = (
+                "SELECT user_id, username, email, created_at, last_logged_in FROM users "
+                "WHERE username IS NOT NULL AND email IS NOT NULL;"
+            )
+        elif filter == "temporary":
+            # SQL query to fetch temporary users
+            select_query = (
+                "SELECT user_id, created_at, last_logged_in FROM users "
+                "WHERE username IS NULL OR email IS NULL;"
+            )
+        elif filter == "all":
+            # SQL query to fetch all users
+            select_query = "SELECT user_id, username, email, created_at, last_logged_in FROM users;"
 
         # Execute the query
         cursor.execute(select_query)
@@ -178,7 +201,9 @@ def get_users() -> list[User]:
             connection.close()
 
 
-def get_selected_user(column_name: str, filter_value: str | int) -> User:
+def get_selected_user(
+    column_name: str, filter_value: str | int, include_password: bool = False
+) -> User:
     """Select user from filtered by selected column.
 
     Args:
@@ -231,12 +256,64 @@ def get_selected_user(column_name: str, filter_value: str | int) -> User:
             "user_id": user_row[0],
             "username": user_row[1],
             "email": user_row[2],
-            # "password": user_row[3],
             "created_at": user_row[4],
             "last_logged_in": user_row[5],
         }
 
+        # Include password hash if requested
+        if include_password:
+            user_dict["password_hash"] = user_row[3]
+
         return user_dict
+
+    except Exception as e:
+        raise e
+
+    finally:
+        # Close the connection and cursor
+        if cursor:
+            cursor.close()
+        if connection:
+            connection.close()
+
+
+def update_user(user_id: int, username: str, email: str, password: str):
+    """Update the user with the given user_id
+    Args:
+        user_id (int): user_id to update
+        username (str): new username
+        email (str): new email
+        password (str): new password
+
+    Raises:
+        ValueError: If trying to update a regular user to another regular user.
+        Exception: If any database error occurs.
+    """
+
+    try:
+        selected_user = get_selected_user(
+            column_name="user_id", filter_value=user_id, include_password=True
+        )
+
+        if selected_user["username"] is not None or selected_user["email"] is not None:
+            raise ValueError("Cannot update a regular user to another regular user.")
+
+        # Establish the connection
+        connection = get_connection()
+        cursor = connection.cursor()
+
+        # SQL query to update the user
+        update_query = f"""
+        UPDATE users
+        SET username='{username}', email='{email}', password_hash='{password}', last_logged_in=NOW()
+        WHERE user_id={user_id};
+        """
+
+        # Execute the query with parameters
+        cursor.execute(update_query)
+
+        # Commit the transaction
+        connection.commit()
 
     except Exception as e:
         raise e
@@ -562,11 +639,12 @@ def insert_messages(messages: list[dict]):
         if connection:
             connection.close()
 
+
 # DATABASE FUNCTIONS - ratings
 def insert_rating(user_id, rating, message, version):
     userId = user_id
     if user_id == 1:
-        userId = 'NULL'
+        userId = "NULL"
     print(version)
 
     try:
@@ -585,16 +663,16 @@ def insert_rating(user_id, rating, message, version):
         rating_id = cursor.fetchone()[0]
         return rating_id
 
-
     except Exception as e:
         connection.rollback()
         raise e
-    
+
     finally:
         if cursor:
             cursor.close()
         if connection:
             connection.close()
+
 
 def check_rating_exists(message_id):
     try:
@@ -621,6 +699,7 @@ def check_rating_exists(message_id):
             cursor.close()
         if connection:
             connection.close()
+
 
 def update_rating(rating_id, rating):
     try:

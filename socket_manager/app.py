@@ -1,11 +1,12 @@
+import redis
 import socketio
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from slowapi import _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
 
-from service.entrypoints import router
+from service.entrypoints import router, limiter
 from config import settings
-import redis
-
 
 # Create Socket.IO server with CORS settings
 sio = socketio.AsyncServer(
@@ -23,11 +24,16 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
 app.include_router(router)
 socket_app = socketio.ASGIApp(sio, app)
 
 # Redis connection
-redis_client = redis.Redis(host=settings.REDIS_HOST, port=settings.REDIS_PORT , decode_responses=True)
+redis_client = redis.Redis(
+    host=settings.REDIS_HOST, port=settings.REDIS_PORT, decode_responses=True
+)
 
 
 @app.get("/")
