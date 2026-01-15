@@ -202,9 +202,9 @@ async def send_message(sid, data, session_id, session_id_int):
         }
         # Add message to Redis thread
         message_data = json.dumps(message_dict)
-
+        thread_name = f"thread:{session_id}:messages"
         # Push the message to the Redis
-        redis_client.rpush(session_id, message_data)
+        redis_client.rpush(thread_name, message_data)
 
         # Insert message into the database
         insert_messages(
@@ -235,7 +235,7 @@ async def send_message(sid, data, session_id, session_id_int):
 
         while retry_count < max_retries:
             await asyncio.sleep(10)  # Check every 0.5 seconds
-            messages = redis_client.lrange(session_id, 0, -1)
+            messages = redis_client.lrange(thread_name, 0, -1)
 
             if len(messages) > 1:  # Check if a response message has been added
                 last_message = json.loads(messages[-1])

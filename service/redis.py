@@ -1,8 +1,9 @@
 import json
 
 
-def insert_into_redis_client(conversation_list, redis_client, thread_name):
-    print("Inserting into Redis:", thread_name)
+def insert_into_redis_client(conversation_list, redis_client, thread_id):
+    print("Inserting into Redis:", thread_id)
+    thread_name = f"thread:{thread_id}:messages"
     conversation_list_updated = []
 
     # check if thread exists
@@ -55,3 +56,4 @@ def insert_into_redis_client(conversation_list, redis_client, thread_name):
     )
     for msg in sorted_conversation_list:
         redis_client.rpush(thread_name, json.dumps(msg))
+        redis_client.publish("thread_events", json.dumps(msg))
