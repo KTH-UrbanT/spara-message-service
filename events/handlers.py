@@ -54,7 +54,7 @@ async def connect(sid, environ, auth):
         insert_into_redis_client(
             conversation_list=messages_list,
             redis_client=redis_client,
-            thread_name=session_id,
+            thread_id=session_id,
         )
 
     # Update the session with the latest messages
@@ -305,7 +305,8 @@ async def session_updated(session_id, room=None):
     if session_id is None:
         messages_list = []
     else:
-        messages = redis_client.lrange(session_id, 0, -1)
+        thread_name = f"thread:{session_id}:messages"
+        messages = redis_client.lrange(thread_name, 0, -1)
         messages_list = [
             json.loads(message)
             for message in messages
