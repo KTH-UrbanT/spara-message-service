@@ -58,6 +58,8 @@ def insert_user(username: str, email: str, password: str) -> int:
     Returns:
         int: user_id of new user
     """
+    connection = None
+    cursor = None
     try:
         # Establish the connection
         connection = get_connection()
@@ -97,6 +99,8 @@ def insert_empty_user() -> int:
     Returns:
         int: user_id of new user
     """
+    connection = None
+    cursor = None
     try:
         # Establish the connection
         connection = get_connection()
@@ -142,6 +146,8 @@ def get_users(filter: str = "all") -> list[User]:
     Returns:
         list: List of users dict
     """
+    connection = None
+    cursor = None
     try:
         # Validate filter type
         if filter not in ["all", "regular", "temporary"]:
@@ -213,6 +219,8 @@ def get_selected_user(
     Returns:
         dict: User dictionary
     """
+    connection = None
+    cursor = None
     try:
         # Raise error if column name is invalid
         if column_name not in ["user_id", "username", "email"]:
@@ -289,7 +297,8 @@ def update_user(user_id: int, username: str, email: str, password: str):
         ValueError: If trying to update a regular user to another regular user.
         Exception: If any database error occurs.
     """
-
+    connection = None
+    cursor = None
     try:
         selected_user = get_selected_user(
             column_name="user_id", filter_value=user_id, include_password=True
@@ -340,6 +349,8 @@ def insert_session(user_id: int, session_token: str, is_active: bool) -> int:
     Returns:
         int: session_id of the new session
     """
+    connection = None
+    cursor = None
     try:
         # Establish the connection
         connection = get_connection()
@@ -384,6 +395,8 @@ def update_session(session_id: int, last_access_time: str, is_active: bool):
     Raises:
         Exception: If any database error occurs.
     """
+    connection = None
+    cursor = None
     try:
         # Establish the connection
         connection = get_connection()
@@ -427,6 +440,8 @@ def get_selected_session(
     Returns:
         list: List of sessions dictionary
     """
+    connection = None
+    cursor = None
     try:
         # Raise error if column name is invalid
         if column_name not in ["session_id", "user_id"]:
@@ -480,6 +495,8 @@ def get_all_sessions() -> list[Session]:
     Returns:
         list: List of sessions dict
     """
+    connection = None
+    cursor = None
     try:
         # Establish the connection
         connection = get_connection()
@@ -532,6 +549,8 @@ def get_selected_messages(column_name: str, filter_value: int) -> list[Message]:
     Returns:
         list: List of sessions dictionary
     """
+    connection = None
+    cursor = None
     try:
         # Raise error if column name is invalid
         if column_name not in ["message_id", "session_id", "sender_id"]:
@@ -594,6 +613,8 @@ def insert_messages(messages: list[dict]):
     Returns:
         list: List of inserted message ids
     """
+    connection = None
+    cursor = None
     if not messages:
         raise ValueError("Messages list is empty.")
 
@@ -642,6 +663,8 @@ def insert_messages(messages: list[dict]):
 
 # DATABASE FUNCTIONS - ratings
 def insert_rating(user_id, rating, message, version):
+    connection = None
+    cursor = None
     userId = user_id
     if user_id == 1:
         userId = "NULL"
@@ -675,6 +698,8 @@ def insert_rating(user_id, rating, message, version):
 
 
 def check_rating_exists(message_id):
+    connection = None
+    cursor = None
     try:
         connection = get_connection()
         cursor = connection.cursor()
@@ -702,6 +727,8 @@ def check_rating_exists(message_id):
 
 
 def update_rating(rating_id, rating):
+    connection = None
+    cursor = None
     try:
         connection = get_connection()
         cursor = connection.cursor()
