@@ -99,38 +99,44 @@ def insert_empty_user() -> int:
     Returns:
         int: user_id of new user
     """
+    # Initialize variables to None at the very start
     connection = None
     cursor = None
+    
     try:
         # Establish the connection
         connection = get_connection()
         cursor = connection.cursor()
 
         # SQL query to insert a new user
-        insert_query = f"""
+        # Note: Using %s is safer, though not strictly required for a static query like this
+        insert_query = """
         INSERT INTO users (created_at, last_logged_in)
         VALUES (NOW(), NOW()) RETURNING user_id;
         """
 
-        # Execute the query with parameters
+        # Execute the query
         cursor.execute(insert_query)
 
         # Commit the transaction
         connection.commit()
 
-        # Fetch the generated user_id for the inserted user
-        user_id = cursor.fetchone()[0]
+        # Fetch the generated user_id
+        result = cursor.fetchone()
+        user_id = result[0] if result else None
 
         return user_id
 
     except Exception as e:
+        # Now we raise the original DB error (like the password failure) 
+        # instead of the UnboundLocalError
         raise e
 
     finally:
-        # Close the connection and cursor
-        if cursor:
+        # Safely close only if they were successfully initialized
+        if cursor is not None:
             cursor.close()
-        if connection:
+        if connection is not None:
             connection.close()
 
 
