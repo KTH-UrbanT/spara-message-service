@@ -1,8 +1,9 @@
 from dataclasses import dataclass
-import psycopg2
+from typing import Any
 import os
-import json
-from config import settings
+
+import psycopg2
+from psycopg2 import sql
 
 
 @dataclass
@@ -34,238 +35,161 @@ class Message:
     sent_at: str
 
 
+ALLOWED_USER_COLUMNS = {"user_id", "username", "email"}
+ALLOWED_SESSION_COLUMNS = {"session_id", "user_id"}
+ALLOWED_MESSAGE_COLUMNS = {"message_id", "session_id", "sender_id"}
+VALID_MESSAGE_ROLES = {"user", "assistant", "system"}
+
+
 def get_connection():
     return psycopg2.connect(
-        host=os.environ["SQL_DB_HOST"],
-        database=os.environ["SQL_DB_NAME"],
-        user=os.environ["SQL_DB_USER"],
+        host=os.environ["SQL_DB_HOST"].strip(),
+        dbname=os.environ["SQL_DB_NAME"].strip(),
+        user=os.environ["SQL_DB_USER"].strip(),
         password=os.environ["SQL_DB_PASSWORD"],
-        port=os.environ["SQL_DB_PORT"],
+        port=os.environ["SQL_DB_PORT"].strip(),
+        connect_timeout=5,
     )
 
 
-# DATABASE FUNCTIONS - USERS
+def _close_safely(cursor=None, connection=None):
+    if cursor is not None:
+        cursor.close()
+    if connection is not None:
+        connection.close()
 
 
 def insert_user(username: str, email: str, password: str) -> int:
-    """Insert a new user into the users table
-
-    Args:
-        username (str): Username
-        email (str): Email
-        password (str): Hashed password
-
-    Returns:
-        int: user_id of new user
-    """
+    """Insert a new user into the users table and return user_id."""
     connection = None
     cursor = None
     try:
-        # Establish the connection
         connection = get_connection()
         cursor = connection.cursor()
-
-        # SQL query to insert a new user
-        insert_query = f"""
-        INSERT INTO users (username, email, password_hash, created_at)
-        VALUES ('{username}', '{email}', '{password}', NOW()) RETURNING user_id;
-        """
-
-        # Execute the query with parameters
-        cursor.execute(insert_query)
-
-        # Commit the transaction
-        connection.commit()
-
-        # Fetch the generated user_id for the inserted user
+        cursor.execute(
+            """
+            INSERT INTO users (username, email, password_hash, created_at)
+            VALUES (%s, %s, %s, NOW())
+            RETURNING user_id;
+            """,
+            (username, email, password),
+        )
         user_id = cursor.fetchone()[0]
-
+        connection.commit()
         return user_id
-
-    except Exception as e:
-        raise e
-
+    except Exception:
+        if connection is not None:
+            connection.rollback()
+        raise
     finally:
-        # Close the connection and cursor
-        if cursor:
-            cursor.close()
-        if connection:
-            connection.close()
+        _close_safely(cursor, connection)
 
 
 def insert_empty_user() -> int:
-    """Insert a new user into the users table
-
-    Returns:
-        int: user_id of new user
-    """
-    # Initialize variables to None at the very start
+    """Insert a new temporary user and return user_id."""
     connection = None
     cursor = None
-    
     try:
-        # Establish the connection
         connection = get_connection()
         cursor = connection.cursor()
-
-        # SQL query to insert a new user
-        # Note: Using %s is safer, though not strictly required for a static query like this
-        insert_query = """
-        INSERT INTO users (created_at, last_logged_in)
-        VALUES (NOW(), NOW()) RETURNING user_id;
-        """
-
-        # Execute the query
-        cursor.execute(insert_query)
-
-        # Commit the transaction
-        connection.commit()
-
-        # Fetch the generated user_id
+        cursor.execute(
+            """
+            INSERT INTO users (created_at, last_logged_in)
+            VALUES (NOW(), NOW())
+            RETURNING user_id;
+            """
+        )
         result = cursor.fetchone()
-        user_id = result[0] if result else None
-
-        return user_id
-
-    except Exception as e:
-        # Now we raise the original DB error (like the password failure) 
-        # instead of the UnboundLocalError
-        raise e
-
-    finally:
-        # Safely close only if they were successfully initialized
-        if cursor is not None:
-            cursor.close()
+        connection.commit()
+        if not result:
+            raise RuntimeError("Failed to create temporary user.")
+        return result[0]
+    except Exception:
         if connection is not None:
-            connection.close()
+            connection.rollback()
+        raise
+    finally:
+        _close_safely(cursor, connection)
 
 
 def get_users(filter: str = "all") -> list[User]:
-    """Select all rows from the users table
-
-    Args:
-        filter ('all' | 'regular' | 'temporary'): Filter type for users.
-            - 'all': Get all users
-            - 'regular': Get regular users (with username and email)
-            - 'temporary': Get temporary users (without username and email)
-
-    Returns:
-        list: List of users dict
-    """
+    """Select users from the users table."""
     connection = None
     cursor = None
     try:
-        # Validate filter type
-        if filter not in ["all", "regular", "temporary"]:
-            raise ValueError(
-                "Invalid filter type. Use 'all', 'regular', or 'temporary'."
-            )
+        if filter not in {"all", "regular", "temporary"}:
+            raise ValueError("Invalid filter type. Use 'all', 'regular', or 'temporary'.")
 
-        # Establish the connection
         connection = get_connection()
         cursor = connection.cursor()
 
         if filter == "regular":
-            # SQL query to fetch regular users
-            select_query = (
-                "SELECT user_id, username, email, created_at, last_logged_in FROM users "
-                "WHERE username IS NOT NULL AND email IS NOT NULL;"
-            )
+            query = """
+                SELECT user_id, username, email, created_at, last_logged_in
+                FROM users
+                WHERE username IS NOT NULL AND email IS NOT NULL;
+            """
         elif filter == "temporary":
-            # SQL query to fetch temporary users
-            select_query = (
-                "SELECT user_id, created_at, last_logged_in FROM users "
-                "WHERE username IS NULL OR email IS NULL;"
-            )
-        elif filter == "all":
-            # SQL query to fetch all users
-            select_query = "SELECT user_id, username, email, created_at, last_logged_in FROM users;"
+            query = """
+                SELECT user_id, username, email, created_at, last_logged_in
+                FROM users
+                WHERE username IS NULL OR email IS NULL;
+            """
+        else:
+            query = """
+                SELECT user_id, username, email, created_at, last_logged_in
+                FROM users;
+            """
 
-        # Execute the query
-        cursor.execute(select_query)
-
-        # Fetch all results
+        cursor.execute(query)
         users = cursor.fetchall()
 
-        # Convert the results to a list of dictionaries
-        users_list = []
-        for user in users:
-            users_list.append(
-                {
-                    "user_id": user[0],
-                    "username": user[1],
-                    "email": user[2],
-                    "created_at": user[3],
-                    "last_logged_in": user[4],
-                }
-            )
-
-        return users_list
-
-    except Exception as e:
-        raise e
-
+        return [
+            {
+                "user_id": user[0],
+                "username": user[1],
+                "email": user[2],
+                "created_at": user[3],
+                "last_logged_in": user[4],
+            }
+            for user in users
+        ]
     finally:
-        # Close the connection and cursor
-        if cursor:
-            cursor.close()
-        if connection:
-            connection.close()
+        _close_safely(cursor, connection)
 
 
 def get_selected_user(
     column_name: str, filter_value: str | int, include_password: bool = False
 ) -> User:
-    """Select user from filtered by selected column.
-
-    Args:
-        column_name ("user_id" | "username" | "email"): column name string to filter
-        filter_value (str | int): filter value for select
-
-    Returns:
-        dict: User dictionary
-    """
+    """Select a single user filtered by a validated column name."""
     connection = None
     cursor = None
     try:
-        # Raise error if column name is invalid
-        if column_name not in ["user_id", "username", "email"]:
+        if column_name not in ALLOWED_USER_COLUMNS:
             raise ValueError("Invalid column name.")
 
-        # Raise error if user_id column filter value is not integer
         if column_name == "user_id" and not isinstance(filter_value, int):
             raise TypeError("'filter_value' should be 'int' for user_id column name.")
 
-        # Raise error if username or email filter value is not string
-        if (column_name == "username" or column_name == "email") and not isinstance(
-            filter_value, str
-        ):
-            raise TypeError(
-                "'filter_value' should be 'str' for username and email column name."
-            )
+        if column_name in {"username", "email"} and not isinstance(filter_value, str):
+            raise TypeError("'filter_value' should be 'str' for username and email column name.")
 
-        # Establish the connection
         connection = get_connection()
         cursor = connection.cursor()
+        query = sql.SQL(
+            """
+            SELECT user_id, username, email, password_hash, created_at, last_logged_in
+            FROM users
+            WHERE {column} = %s;
+            """
+        ).format(column=sql.Identifier(column_name))
 
-        filter_str = (
-            f"'{filter_value}'" if isinstance(filter_value, str) else filter_value
-        )
-        select_query = f"""
-        SELECT user_id, username, email, password_hash, created_at, last_logged_in FROM users
-        WHERE {column_name}={filter_str};
-        """
-
-        # Execute the query
-        cursor.execute(select_query)
-        # Fetch all results
+        cursor.execute(query, (filter_value,))
         user_row = cursor.fetchone()
 
-        # If still no user, raise an error
         if not user_row:
             raise KeyError("User not found for given filters.")
 
-        # Convert the results to a dictionary
         user_dict = {
             "user_id": user_row[0],
             "username": user_row[1],
@@ -274,35 +198,16 @@ def get_selected_user(
             "last_logged_in": user_row[5],
         }
 
-        # Include password hash if requested
         if include_password:
             user_dict["password_hash"] = user_row[3]
 
         return user_dict
-
-    except Exception as e:
-        raise e
-
     finally:
-        # Close the connection and cursor
-        if cursor:
-            cursor.close()
-        if connection:
-            connection.close()
+        _close_safely(cursor, connection)
 
 
 def update_user(user_id: int, username: str, email: str, password: str):
-    """Update the user with the given user_id
-    Args:
-        user_id (int): user_id to update
-        username (str): new username
-        email (str): new email
-        password (str): new password
-
-    Raises:
-        ValueError: If trying to update a regular user to another regular user.
-        Exception: If any database error occurs.
-    """
+    """Update a temporary user into a regular user."""
     connection = None
     cursor = None
     try:
@@ -313,212 +218,145 @@ def update_user(user_id: int, username: str, email: str, password: str):
         if selected_user["username"] is not None or selected_user["email"] is not None:
             raise ValueError("Cannot update a regular user to another regular user.")
 
-        # Establish the connection
         connection = get_connection()
         cursor = connection.cursor()
-
-        # SQL query to update the user
-        update_query = f"""
-        UPDATE users
-        SET username='{username}', email='{email}', password_hash='{password}', last_logged_in=NOW()
-        WHERE user_id={user_id};
-        """
-
-        # Execute the query with parameters
-        cursor.execute(update_query)
-
-        # Commit the transaction
+        cursor.execute(
+            """
+            UPDATE users
+            SET username = %s,
+                email = %s,
+                password_hash = %s,
+                last_logged_in = NOW()
+            WHERE user_id = %s;
+            """,
+            (username, email, password, user_id),
+        )
         connection.commit()
-
-    except Exception as e:
-        raise e
-
+    except Exception:
+        if connection is not None:
+            connection.rollback()
+        raise
     finally:
-        # Close the connection and cursor
-        if cursor:
-            cursor.close()
-        if connection:
-            connection.close()
-
-
-# DATABASE FUNCTIONS - SESSIONS
+        _close_safely(cursor, connection)
 
 
 def insert_session(user_id: int, session_token: str, is_active: bool) -> int:
-    """_summary_
-
-    Args:
-        user_id (int): user id of the session
-        session_token (str): token for the session
-        is_active (bool): True if the session is active, False if not.
-
-    Returns:
-        int: session_id of the new session
-    """
+    """Insert a new session and return session_id."""
     connection = None
     cursor = None
     try:
-        # Establish the connection
         connection = get_connection()
         cursor = connection.cursor()
-
-        # SQL query to insert a new user
-        insert_query = f"""
-        INSERT INTO sessions (user_id, session_token, is_active, created_at, last_accessed)
-        VALUES ({user_id}, '{session_token}', {'TRUE' if is_active else 'FALSE'}, NOW(), NOW()) RETURNING session_id;
-        """
-
-        # Execute the query with parameters
-        cursor.execute(insert_query)
-
-        # Commit the transaction
-        connection.commit()
-
-        # Fetch the generated user_id for the inserted user
+        cursor.execute(
+            """
+            INSERT INTO sessions (user_id, session_token, is_active, created_at, last_accessed)
+            VALUES (%s, %s, %s, NOW(), NOW())
+            RETURNING session_id;
+            """,
+            (user_id, session_token, is_active),
+        )
         session_id = cursor.fetchone()[0]
-
+        connection.commit()
         return session_id
-
-    except Exception as e:
-        raise e
-
+    except Exception:
+        if connection is not None:
+            connection.rollback()
+        raise
     finally:
-        # Close the connection and cursor
-        if cursor:
-            cursor.close()
-        if connection:
-            connection.close()
+        _close_safely(cursor, connection)
 
 
 def update_session(session_id: int, last_access_time: str, is_active: bool):
-    """Update the session with the given session_id
-
-    Args:
-        session_id (int): session_id to update
-        last_access_time (str): last_accessed time string
-        is_active (bool): True if the session is active, False if not.
-
-    Raises:
-        Exception: If any database error occurs.
-    """
+    """Update the session with the given session_id."""
     connection = None
     cursor = None
     try:
-        # Establish the connection
         connection = get_connection()
         cursor = connection.cursor()
-
-        # SQL query to update the session
-        update_query = f"""
-        UPDATE sessions
-        SET last_accessed='{last_access_time}', is_active={'TRUE' if is_active else 'FALSE'}
-        WHERE session_id={session_id};
-        """
-
-        # Execute the query with parameters
-        cursor.execute(update_query)
-
-        # Commit the transaction
+        cursor.execute(
+            """
+            UPDATE sessions
+            SET last_accessed = %s,
+                is_active = %s
+            WHERE session_id = %s;
+            """,
+            (last_access_time, is_active, session_id),
+        )
         connection.commit()
-
-    except Exception as e:
-        raise e
-
+    except Exception:
+        if connection is not None:
+            connection.rollback()
+        raise
     finally:
-        # Close the connection and cursor
-        if cursor:
-            cursor.close()
-        if connection:
-            connection.close()
+        _close_safely(cursor, connection)
 
 
 def get_selected_session(
     column_name: str, filter_value: int, filter_is_active: bool = False
 ) -> list[Session]:
-    """Select sessions from filtered by selected column.
-
-    Args:
-        column_name ("session_id" | "user_id" ): column name string to filter
-        filter_value (int): filter value for select
-        filter_is_active (bool): True if filter by is_active column, False if no filter.
-            Default is False.
-
-    Returns:
-        list: List of sessions dictionary
-    """
+    """Select sessions filtered by a validated column name."""
     connection = None
     cursor = None
     try:
-        # Raise error if column name is invalid
-        if column_name not in ["session_id", "user_id"]:
+        if column_name not in ALLOWED_SESSION_COLUMNS:
             raise ValueError("Invalid column name.")
 
-        # Establish the connection
         connection = get_connection()
         cursor = connection.cursor()
 
-        filter_is_active_str = "AND is_active=TRUE" if filter_is_active else ""
-        select_query = f"""
-        SELECT session_id, user_id, session_token, is_active, created_at, last_accessed FROM sessions
-        WHERE {column_name}={filter_value} {filter_is_active_str};
-        """
+        if filter_is_active:
+            query = sql.SQL(
+                """
+                SELECT session_id, user_id, session_token, is_active, created_at, last_accessed
+                FROM sessions
+                WHERE {column} = %s AND is_active = TRUE;
+                """
+            ).format(column=sql.Identifier(column_name))
+            params = (filter_value,)
+        else:
+            query = sql.SQL(
+                """
+                SELECT session_id, user_id, session_token, is_active, created_at, last_accessed
+                FROM sessions
+                WHERE {column} = %s;
+                """
+            ).format(column=sql.Identifier(column_name))
+            params = (filter_value,)
 
-        # Execute the query
-        cursor.execute(select_query)
-        # Fetch all results
+        cursor.execute(query, params)
         session_rows = cursor.fetchall()
 
-        # Convert the results to a list of dictionaries
-        session_list = []
-        for session in session_rows:
-            session_list.append(
-                {
-                    "session_id": session[0],
-                    "user_id": session[1],
-                    "session_token": session[2],
-                    "is_active": session[3],
-                    "created_at": session[4],
-                    "last_accessed": session[5],
-                }
-            )
-
-        return session_list
-
-    except Exception as e:
-        raise e
-
+        return [
+            {
+                "session_id": session[0],
+                "user_id": session[1],
+                "session_token": session[2],
+                "is_active": session[3],
+                "created_at": session[4],
+                "last_accessed": session[5],
+            }
+            for session in session_rows
+        ]
     finally:
-        # Close the connection and cursor
-        if cursor:
-            cursor.close()
-        if connection:
-            connection.close()
+        _close_safely(cursor, connection)
 
 
 def get_all_sessions() -> list[Session]:
-    """Select all rows from the sessions table
-
-    Returns:
-        list: List of sessions dict
-    """
+    """Select all rows from the sessions table."""
     connection = None
     cursor = None
     try:
-        # Establish the connection
         connection = get_connection()
         cursor = connection.cursor()
-
-        # SQL query to fetch all users
-        select_query = "SELECT session_id, user_id, session_token, is_active, last_accessed FROM sessions;"
-
-        # Execute the query
-        cursor.execute(select_query)
-
-        # Fetch all results
+        cursor.execute(
+            """
+            SELECT session_id, user_id, session_token, is_active, last_accessed
+            FROM sessions;
+            """
+        )
         sessions = cursor.fetchall()
 
-        # Convert the results to a list of dictionaries
-        sessions_list = [
+        return [
             {
                 "session_id": session[0],
                 "user_id": session[1],
@@ -528,179 +366,105 @@ def get_all_sessions() -> list[Session]:
             }
             for session in sessions
         ]
-
-        return sessions_list
-
-    except Exception as e:
-        raise e
-
     finally:
-        # Close the connection and cursor
-        if cursor:
-            cursor.close()
-        if connection:
-            connection.close()
-
-
-# DATABASE FUNCTIONS - MESSAGES
+        _close_safely(cursor, connection)
 
 
 def get_selected_messages(column_name: str, filter_value: int) -> list[Message]:
-    """Select messages from filtered by selected column.
-
-    Args:
-        column_name ("message_id" | "session_id" | "sender_id" ): column name string to filter
-        filter_value (int): filter value for select
-
-    Returns:
-        list: List of sessions dictionary
-    """
+    """Select messages filtered by a validated column name."""
     connection = None
     cursor = None
     try:
-        # Raise error if column name is invalid
-        if column_name not in ["message_id", "session_id", "sender_id"]:
+        if column_name not in ALLOWED_MESSAGE_COLUMNS:
             raise ValueError("Invalid column name.")
 
-        # Establish the connection
         connection = get_connection()
         cursor = connection.cursor()
-
-        select_query = f"""
-        SELECT message_id, session_id, role, content, sent_at FROM messages
-        WHERE {column_name}={filter_value};
-        """
-
-        # Execute the query
-        cursor.execute(select_query)
-        # Fetch all results
+        query = sql.SQL(
+            """
+            SELECT message_id, session_id, role, content, sent_at
+            FROM messages
+            WHERE {column} = %s;
+            """
+        ).format(column=sql.Identifier(column_name))
+        cursor.execute(query, (filter_value,))
         message_rows = cursor.fetchall()
 
-        # Convert the results to a list of dictionaries
-        message_list = []
-        for message in message_rows:
-            message_list.append(
-                {
-                    "message_id": message[0],
-                    "session_id": message[1],
-                    "role": message[2],
-                    "content": message[3],
-                    "sent_at": message[4],
-                }
-            )
-
-        return message_list
-
-    except Exception as e:
-        raise e
-
+        return [
+            {
+                "message_id": message[0],
+                "session_id": message[1],
+                "role": message[2],
+                "content": message[3],
+                "sent_at": message[4],
+            }
+            for message in message_rows
+        ]
     finally:
-        # Close the connection and cursor
-        if cursor:
-            cursor.close()
-        if connection:
-            connection.close()
+        _close_safely(cursor, connection)
 
 
 def insert_messages(messages: list[dict]):
-    """Insert multiple messages into the messages table.
-
-    Args:
-        messages (list[dict]): List of message dictionaries, each containing keys:
-            - session_id (int)
-            - role (str)
-            - content (str)
-            - sent_at (datetime)
-
-    Raises:
-        ValueError: If the messages list is empty or any message dictionary is missing required keys.
-        Exception: If any database error occurs.
-
-    Returns:
-        list: List of inserted message ids
-    """
+    """Insert multiple messages into the messages table."""
     connection = None
     cursor = None
     if not messages:
         raise ValueError("Messages list is empty.")
 
-    check_roles = [(m["role"] not in ["user", "assistant", "system"]) for m in messages]
-
-    if any(check_roles):
+    invalid_roles = [m["role"] for m in messages if m["role"] not in VALID_MESSAGE_ROLES]
+    if invalid_roles:
         raise ValueError(
             "Invalid role type in messages list. Valid roles are 'user', 'assistant', 'system'."
         )
 
     try:
-        # Establish the connection
         connection = get_connection()
         cursor = connection.cursor()
-
         insert_query = """
             INSERT INTO messages (session_id, role, content, sent_at)
-            VALUES (%s, %s, %s, %s) RETURNING message_id;
+            VALUES (%s, %s, %s, %s)
+            RETURNING message_id;
         """
-
-        # Prepare data for insertion
         data = [
             (msg["session_id"], msg["role"], msg["content"], msg["sent_at"])
             for msg in messages
         ]
-
-        # Execute the query
         cursor.executemany(insert_query, data)
-
-        # Commit the transaction
         connection.commit()
-
         return
-
-    except Exception as e:
-        connection.rollback()
-        raise e
-
+    except Exception:
+        if connection is not None:
+            connection.rollback()
+        raise
     finally:
-        # Close the connection and cursor
-        if cursor:
-            cursor.close()
-        if connection:
-            connection.close()
+        _close_safely(cursor, connection)
 
 
-# DATABASE FUNCTIONS - ratings
 def insert_rating(user_id, rating, message, version):
     connection = None
     cursor = None
-    userId = user_id
-    if user_id == 1:
-        userId = "NULL"
-    print(version)
+    user_id_value: Any = None if user_id == 1 else user_id
 
     try:
         connection = get_connection()
         cursor = connection.cursor()
-
-        insert_query = f"""
+        cursor.execute(
+            """
             INSERT INTO ratings (user_id, rating, message, version)
-            VALUES ({userId}, {rating}, '{message}', '{version}') RETURNING rating_id
-        """
-
-        cursor.execute(insert_query)
-
-        connection.commit()
-
+            VALUES (%s, %s, %s, %s)
+            RETURNING rating_id;
+            """,
+            (user_id_value, rating, message, version),
+        )
         rating_id = cursor.fetchone()[0]
+        connection.commit()
         return rating_id
-
-    except Exception as e:
-        connection.rollback()
-        raise e
-
+    except Exception:
+        if connection is not None:
+            connection.rollback()
+        raise
     finally:
-        if cursor:
-            cursor.close()
-        if connection:
-            connection.close()
+        _close_safely(cursor, connection)
 
 
 def check_rating_exists(message_id):
@@ -709,27 +473,18 @@ def check_rating_exists(message_id):
     try:
         connection = get_connection()
         cursor = connection.cursor()
-
-        select_query = f"""
-            SELECT rating_id FROM ratings WHERE message = '{message_id}'
-        """
-
-        cursor.execute(select_query)
+        cursor.execute(
+            """
+            SELECT rating_id
+            FROM ratings
+            WHERE message = %s;
+            """,
+            (message_id,),
+        )
         result = cursor.fetchone()
-
-        if result is not None:
-            return result[0]  # Return the rating_id
-        else:
-            return None
-
-    except Exception as e:
-        raise e
-
+        return result[0] if result is not None else None
     finally:
-        if cursor:
-            cursor.close()
-        if connection:
-            connection.close()
+        _close_safely(cursor, connection)
 
 
 def update_rating(rating_id, rating):
@@ -738,23 +493,18 @@ def update_rating(rating_id, rating):
     try:
         connection = get_connection()
         cursor = connection.cursor()
-
-        update_query = f"""
+        cursor.execute(
+            """
             UPDATE ratings
-            SET rating = {rating}
-            WHERE rating_id = {rating_id}
-        """
-
-        cursor.execute(update_query)
-
+            SET rating = %s
+            WHERE rating_id = %s;
+            """,
+            (rating, rating_id),
+        )
         connection.commit()
-
-    except Exception as e:
-        connection.rollback()
-        raise e
-
+    except Exception:
+        if connection is not None:
+            connection.rollback()
+        raise
     finally:
-        if cursor:
-            cursor.close()
-        if connection:
-            connection.close()
+        _close_safely(cursor, connection)
