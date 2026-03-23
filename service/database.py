@@ -59,6 +59,34 @@ def _close_safely(cursor=None, connection=None):
         connection.close()
 
 
+def ensure_rating_table_exists():
+    """Create the ratings table if it has not been initialized yet."""
+    connection = None
+    cursor = None
+    try:
+        connection = get_connection()
+        cursor = connection.cursor()
+        cursor.execute(
+            """
+            CREATE TABLE IF NOT EXISTS ratings (
+                rating_id SERIAL PRIMARY KEY,
+                user_id INTEGER NULL REFERENCES users(user_id) ON DELETE SET NULL,
+                rating DOUBLE PRECISION NOT NULL,
+                message INTEGER NOT NULL UNIQUE REFERENCES messages(message_id) ON DELETE CASCADE,
+                version TEXT NOT NULL,
+                created_at TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT NOW()
+            );
+            """
+        )
+        connection.commit()
+    except Exception:
+        if connection is not None:
+            connection.rollback()
+        raise
+    finally:
+        _close_safely(cursor, connection)
+
+
 def insert_user(username: str, email: str, password: str) -> int:
     """Insert a new user into the users table and return user_id."""
     connection = None
@@ -446,6 +474,7 @@ def insert_rating(user_id, rating, message, version):
     user_id_value: Any = None if user_id == 1 else user_id
 
     try:
+        ensure_rating_table_exists()
         connection = get_connection()
         cursor = connection.cursor()
         cursor.execute(
@@ -471,6 +500,7 @@ def check_rating_exists(message_id):
     connection = None
     cursor = None
     try:
+        ensure_rating_table_exists()
         connection = get_connection()
         cursor = connection.cursor()
         cursor.execute(
@@ -491,6 +521,7 @@ def update_rating(rating_id, rating):
     connection = None
     cursor = None
     try:
+        ensure_rating_table_exists()
         connection = get_connection()
         cursor = connection.cursor()
         cursor.execute(

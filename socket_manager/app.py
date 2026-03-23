@@ -6,6 +6,7 @@ from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 
 from service.entrypoints import router, limiter
+from service.database import ensure_rating_table_exists
 from config import settings
 
 # Create Socket.IO server with CORS settings
@@ -29,6 +30,11 @@ app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 app.include_router(router)
 socket_app = socketio.ASGIApp(sio, app)
+
+
+@app.on_event("startup")
+async def ensure_database_schema():
+    ensure_rating_table_exists()
 
 # Redis connection
 redis_client = redis.Redis(
