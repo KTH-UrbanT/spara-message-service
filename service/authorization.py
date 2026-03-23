@@ -1,15 +1,20 @@
 import os
+from pathlib import Path
 import jwt
 from datetime import datetime, timedelta, timezone
 from fastapi import Depends, HTTPException
 from fastapi.security import OAuth2PasswordBearer
 from typing import Dict, Any
+from dotenv import load_dotenv
 
 from service.database import get_selected_user
 
-JWT_SECRET_KEY = os.getenv("JWT_SECRET_KEY")
-JWT_ALGORITHM = os.getenv("JWT_ALGORITHM")
-JWT_TOKEN_EXPIRATION_TIME = int(os.getenv("JWT_EXPIRATION_TIME"))
+env_path = Path(__file__).resolve().parent.parent / ".env"
+load_dotenv(dotenv_path=env_path)
+
+JWT_SECRET_KEY = os.getenv("JWT_SECRET_KEY", "dev-secret")
+JWT_ALGORITHM = os.getenv("JWT_ALGORITHM", "HS256")
+JWT_TOKEN_EXPIRATION_TIME = int(os.getenv("JWT_EXPIRATION_TIME", "60"))
 
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/user/login/")
