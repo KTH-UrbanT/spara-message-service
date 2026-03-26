@@ -1,4 +1,5 @@
 import pytest
+import base64
 from fastapi.testclient import TestClient
 from fastapi import FastAPI
 from unittest.mock import patch, MagicMock
@@ -437,6 +438,49 @@ class TestMessageEndpoints:
         mock_get_selected_messages.assert_called_once()
 
     @patch("service.entrypoints.get_selected_session")
+    @patch("service.entrypoints.get_selected_messages")
+    def test_get_messages_by_session_id_includes_optional_rating(
+        self, mock_get_selected_messages, mock_get_selected_session
+    ):
+        """Test message retrieval preserves rating fields when present."""
+        mock_get_selected_session.return_value = [MOCK_SESSION]
+        mock_get_selected_messages.return_value = [
+            {
+                "message_id": 2,
+                "session_id": 100,
+                "role": "assistant",
+                "content": "Hi there!",
+                "sent_at": "2024-01-01T00:00:01",
+                "rating_id": 8,
+                "rating": 4.5,
+                "version": "GROUP-A",
+            },
+            {
+                "message_id": 3,
+                "session_id": 100,
+                "role": "assistant",
+                "content": "Unrated reply",
+                "sent_at": "2024-01-01T00:00:02",
+                "rating_id": None,
+                "rating": None,
+                "version": None,
+            },
+        ]
+        token = create_test_token(
+            user_id=1, email="test@example.com", temporary_user=False
+        )
+
+        response = client.get(
+            "/messages/100/", headers={"Authorization": f"Bearer {token}"}
+        )
+
+        assert response.status_code == 200
+        assert response.json()[0]["rating"] == 4.5
+        assert response.json()[0]["rating_id"] == 8
+        assert response.json()[1]["rating"] is None
+        assert response.json()[1]["version"] is None
+
+    @patch("service.entrypoints.get_selected_session")
     @patch("service.entrypoints.insert_messages")
     def test_create_message_success(
         self, mock_insert_messages, mock_get_selected_session
@@ -463,6 +507,80 @@ class TestMessageEndpoints:
 
         assert response.status_code == 200
         mock_insert_messages.assert_called_once()
+
+
+class TestReportEndpoints:
+    @patch("service.entrypoints.get_selected_session")
+    @patch("service.entrypoints.get_report_payload")
+    def test_download_report_success(
+        self, mock_get_report_payload, mock_get_selected_session
+    ):
+        mock_get_report_payload.return_value = {
+            "thread_id": "session-token-1",
+            "file_name": "draft_report.md",
+            "mime_type": "text/markdown",
+            "content": "# Draft",
+        }
+        mock_get_selected_session.return_value = [
+            {"session_id": 100, "user_id": 1, "session_token": "session-token-1"}
+        ]
+        token = create_test_token(
+            user_id=1, email="test@example.com", temporary_user=False
+        )
+
+        response = client.get(
+            "/reports/report-1/download/",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+        assert response.status_code == 200
+        assert response.text == "# Draft"
+        assert response.headers["content-disposition"] == 'attachment; filename="draft_report.md"'
+
+    @patch("service.entrypoints.get_selected_session")
+    @patch("service.entrypoints.get_report_payload")
+    def test_download_pdf_report_success(
+        self, mock_get_report_payload, mock_get_selected_session
+    ):
+        pdf_bytes = b"%PDF-1.4\nfake"
+        mock_get_report_payload.return_value = {
+            "thread_id": "session-token-1",
+            "file_name": "BUILDING-1.pdf",
+            "mime_type": "application/pdf",
+            "content_base64": base64.b64encode(pdf_bytes).decode("ascii"),
+            "content_encoding": "base64",
+        }
+        mock_get_selected_session.return_value = [
+            {"session_id": 100, "user_id": 1, "session_token": "session-token-1"}
+        ]
+        token = create_test_token(
+            user_id=1, email="test@example.com", temporary_user=False
+        )
+
+        response = client.get(
+            "/reports/report-2/download/",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+        assert response.status_code == 200
+        assert response.content == pdf_bytes
+        assert response.headers["content-type"].startswith("application/pdf")
+        assert response.headers["content-disposition"] == 'attachment; filename="BUILDING-1.pdf"'
+
+    @patch("service.entrypoints.get_report_payload")
+    def test_download_report_not_found(self, mock_get_report_payload):
+        mock_get_report_payload.return_value = None
+        token = create_test_token(
+            user_id=1, email="test@example.com", temporary_user=False
+        )
+
+        response = client.get(
+            "/reports/missing/download/",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+        assert response.status_code == 404
+        assert "expired" in response.json()["detail"]
 
 
 # ============================================

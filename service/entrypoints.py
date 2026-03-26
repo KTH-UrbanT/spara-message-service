@@ -1,4 +1,6 @@
-from fastapi import APIRouter, HTTPException, Depends, Request
+import base64
+
+from fastapi import APIRouter, HTTPException, Depends, Request, Response
 from fastapi.security import OAuth2PasswordRequestForm
 from passlib.context import CryptContext
 import psycopg2.errors
@@ -22,6 +24,7 @@ from service.database import (
     check_rating_exists,
     update_rating,
 )
+from service.report_store import get_report_payload
 
 
 class LoginBody(BaseModel):
@@ -395,6 +398,45 @@ async def send_rating(
             return {"rating_id": rating_id, "message_id": message_id}
     except Exception as e:
         raise e
+
+
+@router.get("/reports/{report_id}/download/", tags=["reports"])
+async def download_report(
+    report_id: str, auth: dict = Depends(auth_service.get_token_data)
+):
+    payload = get_report_payload(report_id)
+    if not payload:
+        raise HTTPException(status_code=404, detail="Report not found or expired.")
+
+    thread_id = payload.get("thread_id")
+    if not thread_id:
+        raise HTTPException(status_code=404, detail="Report metadata is incomplete.")
+
+    sessions = get_selected_session(column_name="session_token", filter_value=thread_id)
+    if not sessions:
+        raise HTTPException(status_code=404, detail="Owning session was not found.")
+
+    session = sessions[0]
+    _ensure_user(session["user_id"], auth)
+
+    file_name = payload.get("file_name") or f"{report_id}.md"
+    mime_type = payload.get("mime_type") or "text/plain"
+    content_encoding = payload.get("content_encoding")
+
+    if content_encoding == "base64":
+        raw_content = payload.get("content_base64") or ""
+        content = base64.b64decode(raw_content)
+    else:
+        content = payload.get("content") or ""
+
+    return Response(
+        content=content,
+        media_type=mime_type,
+        headers={
+            "Content-Disposition": f'attachment; filename="{file_name}"',
+            "Cache-Control": "no-store",
+        },
+    )
 
 
 # Helpers

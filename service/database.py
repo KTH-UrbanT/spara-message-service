@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Optional
 import os
 
 import psycopg2
@@ -33,10 +33,13 @@ class Message:
     role: str
     content: str
     sent_at: str
+    rating_id: Optional[int] = None
+    rating: Optional[float] = None
+    version: Optional[str] = None
 
 
 ALLOWED_USER_COLUMNS = {"user_id", "username", "email"}
-ALLOWED_SESSION_COLUMNS = {"session_id", "user_id"}
+ALLOWED_SESSION_COLUMNS = {"session_id", "user_id", "session_token"}
 ALLOWED_MESSAGE_COLUMNS = {"message_id", "session_id", "sender_id"}
 VALID_MESSAGE_ROLES = {"user", "assistant", "system"}
 
@@ -320,7 +323,7 @@ def update_session(session_id: int, last_access_time: str, is_active: bool):
 
 
 def get_selected_session(
-    column_name: str, filter_value: int, filter_is_active: bool = False
+    column_name: str, filter_value: int | str, filter_is_active: bool = False
 ) -> list[Session]:
     """Select sessions filtered by a validated column name."""
     connection = None
@@ -410,9 +413,20 @@ def get_selected_messages(column_name: str, filter_value: int) -> list[Message]:
         cursor = connection.cursor()
         query = sql.SQL(
             """
-            SELECT message_id, session_id, role, content, sent_at
-            FROM messages
-            WHERE {column} = %s;
+            SELECT
+                m.message_id,
+                m.session_id,
+                m.role,
+                m.content,
+                m.sent_at,
+                CASE WHEN m.role = 'assistant' THEN r.rating_id ELSE NULL END AS rating_id,
+                CASE WHEN m.role = 'assistant' THEN r.rating ELSE NULL END AS rating,
+                CASE WHEN m.role = 'assistant' THEN r.version ELSE NULL END AS version
+            FROM messages AS m
+            LEFT JOIN ratings AS r
+                ON r.message = m.message_id
+            WHERE m.{column} = %s
+            ORDER BY m.sent_at ASC, m.message_id ASC;
             """
         ).format(column=sql.Identifier(column_name))
         cursor.execute(query, (filter_value,))
@@ -425,6 +439,9 @@ def get_selected_messages(column_name: str, filter_value: int) -> list[Message]:
                 "role": message[2],
                 "content": message[3],
                 "sent_at": message[4],
+                "rating_id": message[5],
+                "rating": message[6],
+                "version": message[7],
             }
             for message in message_rows
         ]
