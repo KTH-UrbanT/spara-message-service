@@ -11,7 +11,10 @@ from config import settings
 
 # Create Socket.IO server with CORS settings
 sio = socketio.AsyncServer(
-    async_mode="asgi", cors_allowed_origins="*", logger=True, engineio_logger=True
+    async_mode="asgi",
+    cors_allowed_origins="*",
+    logger=settings.SOCKETIO_LOGGER,
+    engineio_logger=settings.SOCKETIO_ENGINEIO_LOGGER,
 )
 
 # Initialize FastAPI app and mount Socket.IO as ASGI middleware

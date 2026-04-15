@@ -517,8 +517,8 @@ class TestReportEndpoints:
     ):
         mock_get_report_payload.return_value = {
             "thread_id": "session-token-1",
-            "file_name": "draft_report.md",
-            "mime_type": "text/markdown",
+            "file_name": "draft_report.txt",
+            "mime_type": "text/plain; charset=utf-8",
             "content": "# Draft",
         }
         mock_get_selected_session.return_value = [
@@ -535,7 +535,8 @@ class TestReportEndpoints:
 
         assert response.status_code == 200
         assert response.text == "# Draft"
-        assert response.headers["content-disposition"] == 'attachment; filename="draft_report.md"'
+        assert response.headers["content-disposition"] == 'attachment; filename="draft_report.txt"'
+        assert response.headers["content-type"].startswith("text/plain")
 
     @patch("service.entrypoints.get_selected_session")
     @patch("service.entrypoints.get_report_payload")
