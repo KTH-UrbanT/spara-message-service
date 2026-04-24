@@ -248,6 +248,7 @@ async def send_message(sid, data, session_id, session_id_int):
                         "status": "success",
                         "session_id": session_id,
                         "timestamp": last_message.get("timestamp"),
+                        "sources": last_message.get("sources") or [],
                     }
                     break
 
@@ -261,6 +262,7 @@ async def send_message(sid, data, session_id, session_id_int):
                 "status": "error",
                 "session_id": session_id,
                 "timestamp": time.time(),
+                "sources": [],
             }
             redis_client.rpush(session_id, json.dumps(response_message))
 
