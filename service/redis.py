@@ -1,9 +1,16 @@
 import json
 
 
+def _encode_meta_value(value):
+    if isinstance(value, (dict, list, bool)):
+        return json.dumps(value)
+    return str(value)
+
+
 def insert_into_redis_client(conversation_list, redis_client, thread_id):
     print("Inserting into Redis:", thread_id)
     thread_name = f"thread:{thread_id}:messages"
+    meta_name = f"thread:{thread_id}:meta"
     conversation_list_updated = []
 
     # check if thread exists
@@ -34,6 +41,7 @@ def insert_into_redis_client(conversation_list, redis_client, thread_id):
                 "rating_id": msg.get("rating_id"),
                 "rating": msg.get("rating"),
                 "version": msg.get("version"),
+                "metadata": msg.get("metadata") or {},
                 "added_to_database": 1,
             }
 
@@ -49,6 +57,7 @@ def insert_into_redis_client(conversation_list, redis_client, thread_id):
                     "rating_id": payload["rating_id"],
                     "rating": payload["rating"],
                     "version": payload["version"],
+                    "metadata": payload["metadata"] or existing_message.get("metadata") or {},
                 }
                 if merged_message != existing_message:
                     print("Updating message in Redis:", msg["content"])
@@ -69,6 +78,7 @@ def insert_into_redis_client(conversation_list, redis_client, thread_id):
                 "rating_id": msg.get("rating_id"),
                 "rating": msg.get("rating"),
                 "version": msg.get("version"),
+                "metadata": msg.get("metadata") or {},
                 "added_to_database": 1,
             }
             for msg in conversation_list
@@ -80,3 +90,16 @@ def insert_into_redis_client(conversation_list, redis_client, thread_id):
     for msg in sorted_conversation_list:
         redis_client.rpush(thread_name, json.dumps(msg))
         redis_client.publish("thread_events", json.dumps(msg))
+
+    latest_metadata = {}
+    for msg in reversed(conversation_list):
+        metadata = msg.get("metadata") or {}
+        if msg.get("role") == "assistant" and metadata:
+            latest_metadata = metadata
+            break
+
+    if latest_metadata:
+        redis_client.hset(
+            meta_name,
+            mapping={key: _encode_meta_value(value) for key, value in latest_metadata.items()},
+        )

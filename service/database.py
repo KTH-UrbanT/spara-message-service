@@ -1,8 +1,10 @@
 from dataclasses import dataclass
+import json
 from typing import Any, Optional
 import os
 
 import psycopg2
+from psycopg2.extras import Json
 from psycopg2 import sql
 
 
@@ -33,6 +35,7 @@ class Message:
     role: str
     content: str
     sent_at: str
+    metadata: Optional[dict] = None
     rating_id: Optional[int] = None
     rating: Optional[float] = None
     version: Optional[str] = None
@@ -60,6 +63,74 @@ def _close_safely(cursor=None, connection=None):
         cursor.close()
     if connection is not None:
         connection.close()
+
+
+def _normalize_json_value(value: Any, default: Any):
+    if value in (None, ""):
+        return default
+    if isinstance(value, type(default)):
+        return value
+    if isinstance(value, str):
+        try:
+            decoded = json.loads(value)
+        except json.JSONDecodeError:
+            return default
+        return decoded if isinstance(decoded, type(default)) else default
+    return default
+
+
+def ensure_message_observability_schema():
+    """Backfill evaluation columns/tables on existing databases."""
+    connection = None
+    cursor = None
+    try:
+        connection = get_connection()
+        cursor = connection.cursor()
+        cursor.execute(
+            """
+            ALTER TABLE messages
+            ADD COLUMN IF NOT EXISTS metadata JSONB DEFAULT '{}'::jsonb;
+            """
+        )
+        cursor.execute(
+            """
+            ALTER TABLE messages
+            ALTER COLUMN metadata SET DEFAULT '{}'::jsonb;
+            """
+        )
+        cursor.execute(
+            """
+            CREATE TABLE IF NOT EXISTS message_evidence (
+                evidence_id SERIAL PRIMARY KEY,
+                message_id INTEGER NOT NULL REFERENCES messages(message_id) ON DELETE CASCADE,
+                evidence_type TEXT NOT NULL,
+                evidence_payload JSONB NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+            """
+        )
+        connection.commit()
+    except Exception:
+        if connection is not None:
+            connection.rollback()
+        raise
+    finally:
+        _close_safely(cursor, connection)
+
+
+def _insert_message_evidence_rows(cursor, message_id: int, evidence_rows: list[dict]):
+    for evidence in evidence_rows:
+        evidence_type = str(evidence.get("evidence_type") or "").strip()
+        evidence_payload = _normalize_json_value(evidence.get("evidence_payload"), {})
+        if not evidence_type or not evidence_payload:
+            continue
+        cursor.execute(
+            """
+            INSERT INTO message_evidence (message_id, evidence_type, evidence_payload)
+            VALUES (%s, %s, %s);
+            """,
+            (message_id, evidence_type, Json(evidence_payload)),
+        )
 
 
 def ensure_rating_table_exists():
@@ -409,6 +480,7 @@ def get_selected_messages(column_name: str, filter_value: int) -> list[Message]:
         if column_name not in ALLOWED_MESSAGE_COLUMNS:
             raise ValueError("Invalid column name.")
 
+        ensure_message_observability_schema()
         connection = get_connection()
         cursor = connection.cursor()
         query = sql.SQL(
@@ -421,7 +493,8 @@ def get_selected_messages(column_name: str, filter_value: int) -> list[Message]:
                 m.sent_at,
                 CASE WHEN m.role = 'assistant' THEN r.rating_id ELSE NULL END AS rating_id,
                 CASE WHEN m.role = 'assistant' THEN r.rating ELSE NULL END AS rating,
-                CASE WHEN m.role = 'assistant' THEN r.version ELSE NULL END AS version
+                CASE WHEN m.role = 'assistant' THEN r.version ELSE NULL END AS version,
+                m.metadata
             FROM messages AS m
             LEFT JOIN ratings AS r
                 ON r.message = m.message_id
@@ -442,6 +515,7 @@ def get_selected_messages(column_name: str, filter_value: int) -> list[Message]:
                 "rating_id": message[5],
                 "rating": message[6],
                 "version": message[7],
+                "metadata": _normalize_json_value(message[8], {}),
             }
             for message in message_rows
         ]
@@ -463,18 +537,30 @@ def insert_messages(messages: list[dict]):
         )
 
     try:
+        ensure_message_observability_schema()
         connection = get_connection()
         cursor = connection.cursor()
         insert_query = """
-            INSERT INTO messages (session_id, role, content, sent_at)
-            VALUES (%s, %s, %s, %s)
+            INSERT INTO messages (session_id, role, content, sent_at, metadata)
+            VALUES (%s, %s, %s, %s, %s)
             RETURNING message_id;
         """
-        data = [
-            (msg["session_id"], msg["role"], msg["content"], msg["sent_at"])
-            for msg in messages
-        ]
-        cursor.executemany(insert_query, data)
+        for msg in messages:
+            metadata = _normalize_json_value(msg.get("metadata"), {})
+            cursor.execute(
+                insert_query,
+                (
+                    msg["session_id"],
+                    msg["role"],
+                    msg["content"],
+                    msg["sent_at"],
+                    Json(metadata),
+                ),
+            )
+            inserted_message_id = cursor.fetchone()[0]
+            evidence_rows = _normalize_json_value(msg.get("evidence"), [])
+            if evidence_rows:
+                _insert_message_evidence_rows(cursor, inserted_message_id, evidence_rows)
         connection.commit()
         return
     except Exception:

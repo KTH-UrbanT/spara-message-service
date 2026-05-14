@@ -249,6 +249,11 @@ async def send_message(sid, data, session_id, session_id_int):
                         "session_id": session_id,
                         "timestamp": last_message.get("timestamp"),
                         "sources": last_message.get("sources") or [],
+                        "classification": last_message.get("classification"),
+                        "agent_answered": last_message.get("agent_answered"),
+                        "route": last_message.get("route"),
+                        "metadata": last_message.get("metadata") or {},
+                        "evidence": last_message.get("evidence") or [],
                     }
                     break
 
@@ -263,6 +268,8 @@ async def send_message(sid, data, session_id, session_id_int):
                 "session_id": session_id,
                 "timestamp": time.time(),
                 "sources": [],
+                "metadata": {},
+                "evidence": [],
             }
             redis_client.rpush(session_id, json.dumps(response_message))
 
@@ -276,6 +283,8 @@ async def send_message(sid, data, session_id, session_id_int):
                         response_message["timestamp"], tz=timezone.utc
                     ).isoformat(),
                     "session_id": int(session_id_int),
+                    "metadata": response_message.get("metadata") or {},
+                    "evidence": response_message.get("evidence") or [],
                 }
             ]
         )

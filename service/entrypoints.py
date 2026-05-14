@@ -1,10 +1,11 @@
 import base64
+from typing import Any
 
 from fastapi import APIRouter, HTTPException, Depends, Request, Response
 from fastapi.security import OAuth2PasswordRequestForm
 from passlib.context import CryptContext
 import psycopg2.errors
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, EmailStr, Field
 from slowapi import Limiter
 from slowapi.util import get_remote_address
 
@@ -47,6 +48,8 @@ class MessageBody(BaseModel):
     role: str
     content: str
     sent_at: str
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    evidence: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class RatingBody(BaseModel):
