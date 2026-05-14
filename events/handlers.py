@@ -9,6 +9,10 @@ from service.database import (
     insert_messages,
     update_session,
 )
+from service.public_messages import (
+    to_public_message_list,
+    to_public_message_payload,
+)
 from datetime import datetime, timezone
 
 
@@ -293,7 +297,11 @@ async def send_message(sid, data, session_id, session_id_int):
 
         # Emit the response back to the client
         # print("Redis client:", redis_client) # Debugging line
-        await sio.emit("answer_message", response_message, room=sid)
+        await sio.emit(
+            "answer_message",
+            to_public_message_payload(response_message),
+            room=sid,
+        )
         print("Response sent:", response_message)
 
     except Exception as e:
@@ -318,11 +326,8 @@ async def session_updated(session_id, room=None):
     else:
         thread_name = f"thread:{session_id}:messages"
         messages = redis_client.lrange(thread_name, 0, -1)
-        messages_list = [
-            json.loads(message)
-            for message in messages
-            if json.loads(message).get("role") != "system"
-        ]
+        decoded_messages = [json.loads(message) for message in messages]
+        messages_list = to_public_message_list(decoded_messages)
         # print("Messages in Redis for session:", session_id, messages_list) # Debugging line
 
     await sio.emit(
