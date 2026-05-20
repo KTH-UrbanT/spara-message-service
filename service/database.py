@@ -45,6 +45,7 @@ ALLOWED_USER_COLUMNS = {"user_id", "username", "email"}
 ALLOWED_SESSION_COLUMNS = {"session_id", "user_id", "session_token"}
 ALLOWED_MESSAGE_COLUMNS = {"message_id", "session_id", "sender_id"}
 VALID_MESSAGE_ROLES = {"user", "assistant", "system"}
+_MESSAGE_OBSERVABILITY_SCHEMA_READY: Optional[bool] = None
 
 ADVISOR_REVIEW_BOOLEAN_FIELDS = (
     "route_correct",
@@ -126,8 +127,13 @@ def _safety_boundary_from_metadata(metadata: dict[str, Any]) -> dict[str, Any]:
     return _normalize_json_value(safety_boundary, {})
 
 
-def ensure_message_observability_schema():
+def ensure_message_observability_schema() -> bool:
     """Backfill evaluation columns/tables on existing databases."""
+    global _MESSAGE_OBSERVABILITY_SCHEMA_READY
+
+    if _MESSAGE_OBSERVABILITY_SCHEMA_READY is not None:
+        return _MESSAGE_OBSERVABILITY_SCHEMA_READY
+
     connection = None
     cursor = None
     try:
@@ -138,7 +144,7 @@ def ensure_message_observability_schema():
             SELECT EXISTS (
                 SELECT 1
                 FROM information_schema.columns
-                WHERE table_schema = current_schema()
+                WHERE table_schema NOT IN ('pg_catalog', 'information_schema')
                   AND table_name = 'messages'
                   AND column_name = 'metadata'
             );
@@ -150,14 +156,15 @@ def ensure_message_observability_schema():
             SELECT EXISTS (
                 SELECT 1
                 FROM information_schema.tables
-                WHERE table_schema = current_schema()
+                WHERE table_schema NOT IN ('pg_catalog', 'information_schema')
                   AND table_name = 'message_evidence'
             );
             """
         )
         has_message_evidence_table = bool(cursor.fetchone()[0])
         if has_metadata_column and has_message_evidence_table:
-            return
+            _MESSAGE_OBSERVABILITY_SCHEMA_READY = True
+            return True
 
         cursor.execute(
             """
@@ -183,10 +190,17 @@ def ensure_message_observability_schema():
             """
         )
         connection.commit()
-    except Exception:
+        _MESSAGE_OBSERVABILITY_SCHEMA_READY = True
+        return True
+    except Exception as exc:
         if connection is not None:
             connection.rollback()
-        raise
+        print(
+            "Message observability schema is not available; "
+            f"continuing without message metadata/evidence persistence: {exc}"
+        )
+        _MESSAGE_OBSERVABILITY_SCHEMA_READY = False
+        return False
     finally:
         _close_safely(cursor, connection)
 
@@ -568,11 +582,12 @@ def get_selected_messages(column_name: str, filter_value: int) -> list[Message]:
         if column_name not in ALLOWED_MESSAGE_COLUMNS:
             raise ValueError("Invalid column name.")
 
-        ensure_message_observability_schema()
+        observability_ready = ensure_message_observability_schema()
         connection = get_connection()
         cursor = connection.cursor()
+        metadata_select = "m.metadata" if observability_ready else "'{}'::jsonb AS metadata"
         query = sql.SQL(
-            """
+            f"""
             SELECT
                 m.message_id,
                 m.session_id,
@@ -582,7 +597,7 @@ def get_selected_messages(column_name: str, filter_value: int) -> list[Message]:
                 CASE WHEN m.role = 'assistant' THEN r.rating_id ELSE NULL END AS rating_id,
                 CASE WHEN m.role = 'assistant' THEN r.rating ELSE NULL END AS rating,
                 CASE WHEN m.role = 'assistant' THEN r.version ELSE NULL END AS version,
-                m.metadata
+                {metadata_select}
             FROM messages AS m
             LEFT JOIN ratings AS r
                 ON r.message = m.message_id
@@ -981,29 +996,35 @@ def insert_messages(messages: list[dict]):
         )
 
     try:
-        ensure_message_observability_schema()
+        observability_ready = ensure_message_observability_schema()
         connection = get_connection()
         cursor = connection.cursor()
-        insert_query = """
-            INSERT INTO messages (session_id, role, content, sent_at, metadata)
-            VALUES (%s, %s, %s, %s, %s)
-            RETURNING message_id;
-        """
+        if observability_ready:
+            insert_query = """
+                INSERT INTO messages (session_id, role, content, sent_at, metadata)
+                VALUES (%s, %s, %s, %s, %s)
+                RETURNING message_id;
+            """
+        else:
+            insert_query = """
+                INSERT INTO messages (session_id, role, content, sent_at)
+                VALUES (%s, %s, %s, %s)
+                RETURNING message_id;
+            """
         for msg in messages:
             metadata = _normalize_json_value(msg.get("metadata"), {})
-            cursor.execute(
-                insert_query,
-                (
+            params = (
                     msg["session_id"],
                     msg["role"],
                     msg["content"],
                     msg["sent_at"],
-                    Json(metadata),
-                ),
             )
+            if observability_ready:
+                params = (*params, Json(metadata))
+            cursor.execute(insert_query, params)
             inserted_message_id = cursor.fetchone()[0]
             evidence_rows = _normalize_json_value(msg.get("evidence"), [])
-            if evidence_rows:
+            if observability_ready and evidence_rows:
                 _insert_message_evidence_rows(cursor, inserted_message_id, evidence_rows)
         connection.commit()
         return
