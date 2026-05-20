@@ -135,6 +135,32 @@ def ensure_message_observability_schema():
         cursor = connection.cursor()
         cursor.execute(
             """
+            SELECT EXISTS (
+                SELECT 1
+                FROM information_schema.columns
+                WHERE table_schema = current_schema()
+                  AND table_name = 'messages'
+                  AND column_name = 'metadata'
+            );
+            """
+        )
+        has_metadata_column = bool(cursor.fetchone()[0])
+        cursor.execute(
+            """
+            SELECT EXISTS (
+                SELECT 1
+                FROM information_schema.tables
+                WHERE table_schema = current_schema()
+                  AND table_name = 'message_evidence'
+            );
+            """
+        )
+        has_message_evidence_table = bool(cursor.fetchone()[0])
+        if has_metadata_column and has_message_evidence_table:
+            return
+
+        cursor.execute(
+            """
             ALTER TABLE messages
             ADD COLUMN IF NOT EXISTS metadata JSONB DEFAULT '{}'::jsonb;
             """

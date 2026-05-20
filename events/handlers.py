@@ -108,7 +108,7 @@ async def connect(sid, environ, auth):
             return False
 
         session_id = _build_thread_id(user_email, auth["session_id"])
-        sio.enter_room(sid, session_id)
+        await sio.enter_room(sid, session_id)
         await sio.save_session(
             sid,
             {
