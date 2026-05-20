@@ -46,6 +46,38 @@ ALLOWED_SESSION_COLUMNS = {"session_id", "user_id", "session_token"}
 ALLOWED_MESSAGE_COLUMNS = {"message_id", "session_id", "sender_id"}
 VALID_MESSAGE_ROLES = {"user", "assistant", "system"}
 
+ADVISOR_REVIEW_BOOLEAN_FIELDS = (
+    "route_correct",
+    "building_data_correct",
+    "recommendation_correct",
+    "personalized",
+    "useful",
+    "too_generic",
+    "needs_minor_edit",
+    "needs_major_edit",
+    "unsafe_or_misleading",
+    "should_have_asked_clarification",
+    "should_have_escalated",
+)
+
+ADVISOR_REVIEW_SCORE_FIELDS = (
+    "technical_correctness_score",
+    "building_specificity_score",
+    "personalization_score",
+    "usefulness_score",
+    "justification_score",
+    "clarity_score",
+    "trust_score",
+    "safety_score",
+    "advisor_confidence",
+)
+
+ADVISOR_REVIEW_CORRECTION_FIELDS = (
+    "correction_actions",
+    "corrected_answer",
+    "correction_summary",
+)
+
 
 def get_connection():
     return psycopg2.connect(
@@ -77,6 +109,21 @@ def _normalize_json_value(value: Any, default: Any):
             return default
         return decoded if isinstance(decoded, type(default)) else default
     return default
+
+
+def _telemetry_from_metadata(metadata: dict[str, Any]) -> dict[str, Any]:
+    telemetry = metadata.get("telemetry") if isinstance(metadata, dict) else None
+    return _normalize_json_value(telemetry, {})
+
+
+def _grounding_from_metadata(metadata: dict[str, Any]) -> dict[str, Any]:
+    grounding = metadata.get("grounding") if isinstance(metadata, dict) else None
+    return _normalize_json_value(grounding, {})
+
+
+def _safety_boundary_from_metadata(metadata: dict[str, Any]) -> dict[str, Any]:
+    safety_boundary = metadata.get("safety_boundary") if isinstance(metadata, dict) else None
+    return _normalize_json_value(safety_boundary, {})
 
 
 def ensure_message_observability_schema():
@@ -187,8 +234,8 @@ def insert_user(username: str, email: str, password: str) -> int:
         _close_safely(cursor, connection)
 
 
-def insert_empty_user() -> int:
-    """Insert a new temporary user and return user_id."""
+def insert_temporary_user(email: str) -> int:
+    """Insert a new email-backed temporary user and return user_id."""
     connection = None
     cursor = None
     try:
@@ -196,10 +243,11 @@ def insert_empty_user() -> int:
         cursor = connection.cursor()
         cursor.execute(
             """
-            INSERT INTO users (created_at, last_logged_in)
-            VALUES (NOW(), NOW())
+            INSERT INTO users (email, created_at, last_logged_in)
+            VALUES (%s, NOW(), NOW())
             RETURNING user_id;
-            """
+            """,
+            (email,),
         )
         result = cursor.fetchone()
         connection.commit()
@@ -212,6 +260,11 @@ def insert_empty_user() -> int:
         raise
     finally:
         _close_safely(cursor, connection)
+
+
+def insert_empty_user() -> int:
+    """Legacy guard for the previous anonymous temporary-user flow."""
+    raise ValueError("Temporary users must provide an email address.")
 
 
 def get_users(filter: str = "all") -> list[User]:
@@ -229,13 +282,15 @@ def get_users(filter: str = "all") -> list[User]:
             query = """
                 SELECT user_id, username, email, created_at, last_logged_in
                 FROM users
-                WHERE username IS NOT NULL AND email IS NOT NULL;
+                WHERE username IS NOT NULL
+                    AND email IS NOT NULL
+                    AND password_hash IS NOT NULL;
             """
         elif filter == "temporary":
             query = """
                 SELECT user_id, username, email, created_at, last_logged_in
                 FROM users
-                WHERE username IS NULL OR email IS NULL;
+                WHERE username IS NULL OR password_hash IS NULL;
             """
         else:
             query = """
@@ -278,13 +333,20 @@ def get_selected_user(
 
         connection = get_connection()
         cursor = connection.cursor()
-        query = sql.SQL(
+        if column_name == "email":
+            query = """
+                SELECT user_id, username, email, password_hash, created_at, last_logged_in
+                FROM users
+                WHERE LOWER(email) = LOWER(%s);
             """
-            SELECT user_id, username, email, password_hash, created_at, last_logged_in
-            FROM users
-            WHERE {column} = %s;
-            """
-        ).format(column=sql.Identifier(column_name))
+        else:
+            query = sql.SQL(
+                """
+                SELECT user_id, username, email, password_hash, created_at, last_logged_in
+                FROM users
+                WHERE {column} = %s;
+                """
+            ).format(column=sql.Identifier(column_name))
 
         cursor.execute(query, (filter_value,))
         user_row = cursor.fetchone()
@@ -317,7 +379,7 @@ def update_user(user_id: int, username: str, email: str, password: str):
             column_name="user_id", filter_value=user_id, include_password=True
         )
 
-        if selected_user["username"] is not None or selected_user["email"] is not None:
+        if selected_user["username"] is not None or selected_user.get("password_hash") is not None:
             raise ValueError("Cannot update a regular user to another regular user.")
 
         connection = get_connection()
@@ -519,6 +581,362 @@ def get_selected_messages(column_name: str, filter_value: int) -> list[Message]:
             }
             for message in message_rows
         ]
+    finally:
+        _close_safely(cursor, connection)
+
+def ensure_advisor_review_table_exists():
+    """Create the advisor review table for structured evaluation rubrics."""
+    connection = None
+    cursor = None
+    try:
+        connection = get_connection()
+        cursor = connection.cursor()
+        cursor.execute(
+            """
+            CREATE TABLE IF NOT EXISTS advisor_reviews (
+                advisor_review_id SERIAL PRIMARY KEY,
+                message_id INTEGER NOT NULL UNIQUE REFERENCES messages(message_id) ON DELETE CASCADE,
+                reviewer_user_id INTEGER NULL REFERENCES users(user_id) ON DELETE SET NULL,
+                route_correct BOOLEAN NULL,
+                building_data_correct BOOLEAN NULL,
+                recommendation_correct BOOLEAN NULL,
+                personalized BOOLEAN NULL,
+                useful BOOLEAN NULL,
+                too_generic BOOLEAN NULL,
+                needs_minor_edit BOOLEAN NULL,
+                needs_major_edit BOOLEAN NULL,
+                unsafe_or_misleading BOOLEAN NULL,
+                should_have_asked_clarification BOOLEAN NULL,
+                should_have_escalated BOOLEAN NULL,
+                technical_correctness_score DOUBLE PRECISION NULL,
+                building_specificity_score DOUBLE PRECISION NULL,
+                personalization_score DOUBLE PRECISION NULL,
+                usefulness_score DOUBLE PRECISION NULL,
+                justification_score DOUBLE PRECISION NULL,
+                clarity_score DOUBLE PRECISION NULL,
+                trust_score DOUBLE PRECISION NULL,
+                safety_score DOUBLE PRECISION NULL,
+                advisor_confidence DOUBLE PRECISION NULL,
+                error_tags JSONB NOT NULL DEFAULT '[]'::jsonb,
+                correction_actions JSONB NOT NULL DEFAULT '[]'::jsonb,
+                corrected_answer TEXT NULL,
+                correction_summary TEXT NULL,
+                comments TEXT NULL,
+                created_at TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT NOW()
+            );
+            """
+        )
+        cursor.execute(
+            """
+            ALTER TABLE advisor_reviews
+            ADD COLUMN IF NOT EXISTS correction_actions JSONB NOT NULL DEFAULT '[]'::jsonb,
+            ADD COLUMN IF NOT EXISTS corrected_answer TEXT NULL,
+            ADD COLUMN IF NOT EXISTS correction_summary TEXT NULL;
+            """
+        )
+        connection.commit()
+    except Exception:
+        if connection is not None:
+            connection.rollback()
+        raise
+    finally:
+        _close_safely(cursor, connection)
+
+
+def upsert_advisor_review(
+    *,
+    message_id: int,
+    reviewer_user_id: int,
+    review: dict[str, Any],
+) -> dict[str, Any]:
+    """Insert or update one advisor rubric review for an assistant message."""
+    connection = None
+    cursor = None
+    try:
+        ensure_advisor_review_table_exists()
+        connection = get_connection()
+        cursor = connection.cursor()
+
+        field_names = [
+            *ADVISOR_REVIEW_BOOLEAN_FIELDS,
+            *ADVISOR_REVIEW_SCORE_FIELDS,
+            "error_tags",
+            *ADVISOR_REVIEW_CORRECTION_FIELDS,
+            "comments",
+        ]
+        values = []
+        for field_name in field_names:
+            if field_name in {"error_tags", "correction_actions"}:
+                values.append(Json(_normalize_json_value(review.get(field_name), [])))
+            else:
+                values.append(review.get(field_name))
+
+        insert_columns = ["message_id", "reviewer_user_id", *field_names]
+        placeholders = ", ".join(["%s"] * len(insert_columns))
+        update_assignments = ", ".join(
+            f"{field_name} = EXCLUDED.{field_name}"
+            for field_name in ["reviewer_user_id", *field_names]
+        )
+
+        cursor.execute(
+            f"""
+            INSERT INTO advisor_reviews ({", ".join(insert_columns)})
+            VALUES ({placeholders})
+            ON CONFLICT (message_id) DO UPDATE
+            SET {update_assignments},
+                updated_at = NOW()
+            RETURNING advisor_review_id, message_id, reviewer_user_id, updated_at;
+            """,
+            [message_id, reviewer_user_id, *values],
+        )
+        row = cursor.fetchone()
+        connection.commit()
+        return {
+            "advisor_review_id": row[0],
+            "message_id": row[1],
+            "reviewer_user_id": row[2],
+            "updated_at": row[3],
+        }
+    except Exception:
+        if connection is not None:
+            connection.rollback()
+        raise
+    finally:
+        _close_safely(cursor, connection)
+
+
+def get_evaluation_records(
+    *,
+    user_id: Optional[int] = None,
+    session_id: Optional[int] = None,
+) -> list[dict[str, Any]]:
+    """Return one export row per assistant answer for evaluation analysis."""
+    connection = None
+    cursor = None
+    try:
+        ensure_message_observability_schema()
+        ensure_rating_table_exists()
+        ensure_advisor_review_table_exists()
+        connection = get_connection()
+        cursor = connection.cursor()
+
+        filters = []
+        params: list[Any] = []
+        if user_id is not None:
+            filters.append("s.user_id = %s")
+            params.append(user_id)
+        if session_id is not None:
+            filters.append("s.session_id = %s")
+            params.append(session_id)
+
+        where_clause = ""
+        if filters:
+            where_clause = "WHERE " + " AND ".join(filters)
+
+        query = f"""
+            WITH ordered_messages AS (
+                SELECT
+                    m.message_id,
+                    m.session_id,
+                    m.role,
+                    m.content,
+                    m.sent_at,
+                    m.metadata,
+                    LAG(m.message_id) OVER (
+                        PARTITION BY m.session_id
+                        ORDER BY m.sent_at ASC, m.message_id ASC
+                    ) AS previous_message_id,
+                    LAG(m.role) OVER (
+                        PARTITION BY m.session_id
+                        ORDER BY m.sent_at ASC, m.message_id ASC
+                    ) AS previous_role,
+                    LAG(m.content) OVER (
+                        PARTITION BY m.session_id
+                        ORDER BY m.sent_at ASC, m.message_id ASC
+                    ) AS previous_content,
+                    LAG(m.sent_at) OVER (
+                        PARTITION BY m.session_id
+                        ORDER BY m.sent_at ASC, m.message_id ASC
+                    ) AS previous_sent_at
+                FROM messages AS m
+                JOIN sessions AS s
+                    ON s.session_id = m.session_id
+                {where_clause}
+            )
+            SELECT
+                om.session_id,
+                s.session_token,
+                s.user_id,
+                u.username,
+                CASE WHEN om.previous_role = 'user' THEN om.previous_message_id ELSE NULL END AS query_message_id,
+                om.message_id AS answer_message_id,
+                CASE WHEN om.previous_role = 'user' THEN om.previous_sent_at ELSE NULL END AS query_sent_at,
+                om.sent_at AS answer_sent_at,
+                CASE WHEN om.previous_role = 'user' THEN om.previous_content ELSE NULL END AS user_message,
+                om.content AS assistant_content,
+                r.rating,
+                r.rating_id,
+                r.version AS rating_version,
+                om.metadata,
+                ar.advisor_review,
+                COALESCE(
+                    jsonb_agg(
+                        jsonb_build_object(
+                            'evidence_type', me.evidence_type,
+                            'evidence_payload', me.evidence_payload
+                        )
+                        ORDER BY me.evidence_id
+                    ) FILTER (WHERE me.evidence_id IS NOT NULL),
+                    '[]'::jsonb
+                ) AS evidence
+            FROM ordered_messages AS om
+            JOIN sessions AS s
+                ON s.session_id = om.session_id
+            LEFT JOIN users AS u
+                ON u.user_id = s.user_id
+            LEFT JOIN ratings AS r
+                ON r.message = om.message_id
+            LEFT JOIN message_evidence AS me
+                ON me.message_id = om.message_id
+            LEFT JOIN LATERAL (
+                SELECT jsonb_build_object(
+                    'advisor_review_id', advisor_review_id,
+                    'reviewer_user_id', reviewer_user_id,
+                    'route_correct', route_correct,
+                    'building_data_correct', building_data_correct,
+                    'recommendation_correct', recommendation_correct,
+                    'personalized', personalized,
+                    'useful', useful,
+                    'too_generic', too_generic,
+                    'needs_minor_edit', needs_minor_edit,
+                    'needs_major_edit', needs_major_edit,
+                    'unsafe_or_misleading', unsafe_or_misleading,
+                    'should_have_asked_clarification', should_have_asked_clarification,
+                    'should_have_escalated', should_have_escalated,
+                    'technical_correctness_score', technical_correctness_score,
+                    'building_specificity_score', building_specificity_score,
+                    'personalization_score', personalization_score,
+                    'usefulness_score', usefulness_score,
+                    'justification_score', justification_score,
+                    'clarity_score', clarity_score,
+                    'trust_score', trust_score,
+                    'safety_score', safety_score,
+                    'advisor_confidence', advisor_confidence,
+                    'error_tags', error_tags,
+                    'correction_actions', correction_actions,
+                    'corrected_answer', corrected_answer,
+                    'correction_summary', correction_summary,
+                    'comments', comments,
+                    'updated_at', updated_at
+                ) AS advisor_review
+                FROM advisor_reviews
+                WHERE advisor_reviews.message_id = om.message_id
+            ) AS ar ON TRUE
+            WHERE om.role = 'assistant'
+            GROUP BY
+                om.session_id,
+                s.session_token,
+                s.user_id,
+                u.username,
+                om.previous_role,
+                om.previous_message_id,
+                om.previous_sent_at,
+                om.message_id,
+                om.sent_at,
+                om.previous_content,
+                om.content,
+                r.rating,
+                r.rating_id,
+                r.version,
+                om.metadata,
+                ar.advisor_review
+            ORDER BY om.sent_at ASC, om.message_id ASC;
+        """
+
+        cursor.execute(query, params)
+        rows = cursor.fetchall()
+        records = []
+        for row in rows:
+            metadata = _normalize_json_value(row[13], {})
+            telemetry = _telemetry_from_metadata(metadata)
+            grounding = _grounding_from_metadata(metadata)
+            safety_boundary = _safety_boundary_from_metadata(metadata)
+            advisor_review = _normalize_json_value(row[14], {})
+            evidence = _normalize_json_value(row[15], [])
+            record = {
+                "session_id": row[0],
+                "session_token": row[1],
+                "user_id": row[2],
+                "username": row[3],
+                "query_message_id": row[4],
+                "answer_message_id": row[5],
+                "query_sent_at": row[6],
+                "answer_sent_at": row[7],
+                "user_message": row[8],
+                "assistant_content": row[9],
+                "rating": row[10],
+                "rating_id": row[11],
+                "rating_version": row[12],
+                "route": metadata.get("route"),
+                "agent": metadata.get("agent"),
+                "classification": metadata.get("classification"),
+                "intent": metadata.get("intent"),
+                "needs_clarification": metadata.get("needs_clarification"),
+                "out_of_scope": metadata.get("out_of_scope"),
+                "building_id": metadata.get("building_id"),
+                "building_match": metadata.get("building_match") or {},
+                "retrieved_facts": metadata.get("retrieved_facts") or {},
+                "vector_sources": metadata.get("vector_sources") or [],
+                "grounding": grounding,
+                "grounding_status": grounding.get("status"),
+                "claim_count": grounding.get("claim_count"),
+                "supported_claim_count": grounding.get("supported_claim_count"),
+                "unsupported_claim_count": grounding.get("unsupported_claim_count"),
+                "support_ratio": grounding.get("support_ratio"),
+                "unsupported_claim_rate": grounding.get("unsupported_claim_rate"),
+                "citation_coverage": grounding.get("citation_coverage"),
+                "unsupported_claims": grounding.get("unsupported_claims") or [],
+                "data_freshness": metadata.get("data_freshness") or {},
+                "uncertainty": metadata.get("uncertainty") or {},
+                "boundary_handling": metadata.get("boundary_handling") or {},
+                "safety_boundary": safety_boundary,
+                "safety_status": safety_boundary.get("status"),
+                "safety_risk_category": safety_boundary.get("risk_category"),
+                "safety_action": safety_boundary.get("action"),
+                "safety_handled_safely": safety_boundary.get("handled_safely"),
+                "safety_requires_review": safety_boundary.get("requires_review"),
+                "safety_redirect_to": safety_boundary.get("redirect_to"),
+                "safety_reason_codes": safety_boundary.get("reason_codes") or [],
+                "telemetry": telemetry,
+                "total_latency_seconds": telemetry.get("total_latency_seconds"),
+                "model_call_count": telemetry.get("model_call_count"),
+                "retrieval_call_count": telemetry.get("retrieval_call_count"),
+                "sql_call_count": telemetry.get("sql_call_count"),
+                "prompt_tokens": telemetry.get("prompt_tokens"),
+                "completion_tokens": telemetry.get("completion_tokens"),
+                "total_tokens": telemetry.get("total_tokens"),
+                "token_usage_estimated": telemetry.get("token_usage_estimated"),
+                "estimated_cost_usd": telemetry.get("estimated_cost_usd"),
+                "component_latency_seconds": telemetry.get("component_latency_seconds") or {},
+                "telemetry_failures": telemetry.get("failures") or [],
+                "metadata": metadata,
+                "advisor_review": advisor_review,
+                "evidence": evidence,
+            }
+            if advisor_review:
+                record["advisor_review_id"] = advisor_review.get("advisor_review_id")
+                record["advisor_reviewer_user_id"] = advisor_review.get("reviewer_user_id")
+                for review_field in (
+                    *ADVISOR_REVIEW_BOOLEAN_FIELDS,
+                    *ADVISOR_REVIEW_SCORE_FIELDS,
+                    "error_tags",
+                    *ADVISOR_REVIEW_CORRECTION_FIELDS,
+                    "comments",
+                ):
+                    record[review_field] = advisor_review.get(review_field)
+            records.append(record)
+        return records
     finally:
         _close_safely(cursor, connection)
 

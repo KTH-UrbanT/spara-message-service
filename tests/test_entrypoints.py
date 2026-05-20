@@ -118,9 +118,9 @@ class TestUserEndpoints:
         assert "access_token" in response.json()
         assert response.json()["token_type"] == "bearer"
         assert response.json()["user_id"] == 2
+        assert response.json()["email"] == "temporary@example.com"
+        assert response.json()["username"] is None
         assert response.json()["temporary_user"] is True
-        assert "username" not in response.json()
-        assert "email" not in response.json()
         assert "password_hash" not in response.json()
         assert "password" not in response.json()
         mock_get_selected_user.assert_called_once()
@@ -150,19 +150,58 @@ class TestUserEndpoints:
         assert "successfully" in response.json()["message"]
         mock_insert_user.assert_called_once()
 
-    @patch("service.entrypoints.insert_empty_user")
-    def test_register_temporary_user_success(self, mock_insert_empty_user):
+    @patch("service.entrypoints.get_selected_user")
+    @patch("service.entrypoints.insert_temporary_user")
+    def test_register_temporary_user_success(self, mock_insert_temporary_user, mock_get_selected_user):
         """Test successful temporary user registration"""
-        mock_insert_empty_user.return_value = {
-            "user_id": 10,
-            "message": "Temporary user created",
-        }
+        mock_get_selected_user.side_effect = KeyError("User not found")
+        mock_insert_temporary_user.return_value = 10
 
-        response = client.post("/user/register/temporary/")
+        response = client.post(
+            "/user/register/temporary/",
+            json={"email": "Temporary@Example.com"},
+        )
 
         assert response.status_code == 200
         assert response.json()["user_id"] == 10
-        mock_insert_empty_user.assert_called_once()
+        assert response.json()["email"] == "temporary@example.com"
+        mock_insert_temporary_user.assert_called_once_with(email="temporary@example.com")
+
+    @patch("service.entrypoints.get_selected_user")
+    @patch("service.entrypoints.insert_temporary_user")
+    def test_register_temporary_user_reuses_existing_temporary_user(
+        self, mock_insert_temporary_user, mock_get_selected_user
+    ):
+        """Test continue-with-email reuses an existing email-backed temporary user."""
+        mock_get_selected_user.return_value = MOCK_USER_TEMP
+
+        response = client.post(
+            "/user/register/temporary/",
+            json={"email": "Temporary@Example.com"},
+        )
+
+        assert response.status_code == 200
+        assert response.json()["user_id"] == 2
+        assert response.json()["email"] == "temporary@example.com"
+        assert "loaded" in response.json()["message"]
+        mock_insert_temporary_user.assert_not_called()
+
+    @patch("service.entrypoints.get_selected_user")
+    @patch("service.entrypoints.insert_temporary_user")
+    def test_register_temporary_user_rejects_registered_email(
+        self, mock_insert_temporary_user, mock_get_selected_user
+    ):
+        """Test continue-with-email does not bypass password login."""
+        mock_get_selected_user.return_value = MOCK_USER_REGULAR
+
+        response = client.post(
+            "/user/register/temporary/",
+            json={"email": "test@example.com"},
+        )
+
+        assert response.status_code == 400
+        assert "Please log in" in response.json()["detail"]
+        mock_insert_temporary_user.assert_not_called()
 
 
 # ============================================
@@ -226,7 +265,7 @@ class TestUserAuthenticationErrors:
     def test_get_all_users_temporary_user_forbidden(self):
         """Test that temporary users cannot access get all users endpoint"""
         token = create_test_token(
-            user_id=2, email="", temporary_user=True
+            user_id=2, email="temporary@example.com", temporary_user=True
         )  # Temp user token
 
         response = client.get("/users/", headers={"Authorization": f"Bearer {token}"})
@@ -265,7 +304,7 @@ class TestUserAuthenticationErrors:
         """Test regular login endpoint with temporary user (should fail)"""
         mock_get_selected_user.return_value = MOCK_USER_TEMP
         token = create_test_token(
-            user_id=2, email="", temporary_user=True
+            user_id=2, email="temporary@example.com", temporary_user=True
         )  # Temp user token
 
         response = client.post(
@@ -817,3 +856,65 @@ class TestRatingAuthenticationErrors:
 
         assert response.status_code == 404
         assert "Message not found" in response.json()["detail"]
+
+
+class TestEvaluationEndpoints:
+    @patch("service.entrypoints.upsert_advisor_review")
+    def test_save_advisor_review_with_corrections_success(self, mock_upsert_advisor_review):
+        mock_upsert_advisor_review.return_value = {
+            "advisor_review_id": 7,
+            "message_id": 22,
+            "reviewer_user_id": 1,
+            "updated_at": "2026-05-19T12:00:00",
+        }
+        token = create_test_token(
+            user_id=1, email="test@example.com", temporary_user=False
+        )
+
+        response = client.post(
+            "/evaluation/advisor-review/",
+            json={
+                "message_id": 22,
+                "route_correct": True,
+                "error_tags": ["generation", "unsupported_claim"],
+                "correction_actions": [
+                    {"type": "remove_unsupported_claim", "field": "recommendation"}
+                ],
+                "corrected_answer": "Use general advice until the building data is confirmed.",
+                "correction_summary": "Removed a claim that was not supported by retrieved evidence.",
+                "comments": "Needs a clearer source citation.",
+            },
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+        assert response.status_code == 200
+        assert response.json()["advisor_review_id"] == 7
+        mock_upsert_advisor_review.assert_called_once()
+        call_kwargs = mock_upsert_advisor_review.call_args.kwargs
+        assert call_kwargs["message_id"] == 22
+        assert call_kwargs["reviewer_user_id"] == 1
+        assert call_kwargs["review"]["correction_actions"] == [
+            {"type": "remove_unsupported_claim", "field": "recommendation"}
+        ]
+        assert call_kwargs["review"]["corrected_answer"] == (
+            "Use general advice until the building data is confirmed."
+        )
+        assert call_kwargs["review"]["correction_summary"] == (
+            "Removed a claim that was not supported by retrieved evidence."
+        )
+
+    @patch("service.entrypoints.upsert_advisor_review")
+    def test_save_advisor_review_forbidden_for_temporary_user(self, mock_upsert_advisor_review):
+        token = create_test_token(
+            user_id=2, email="temporary@example.com", temporary_user=True
+        )
+
+        response = client.post(
+            "/evaluation/advisor-review/",
+            json={"message_id": 22, "comments": "temporary user cannot review"},
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+        assert response.status_code == 403
+        assert "Temporary users cannot submit advisor reviews" in response.json()["detail"]
+        mock_upsert_advisor_review.assert_not_called()

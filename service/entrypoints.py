@@ -14,16 +14,22 @@ from service.database import (
     get_users,
     get_selected_user,
     insert_user,
-    insert_empty_user,
+    insert_temporary_user,
     update_user,
     get_selected_session,
     insert_session,
     get_selected_messages,
+    get_evaluation_records,
+    upsert_advisor_review,
     insert_messages,
     Message,
     insert_rating,
     check_rating_exists,
     update_rating,
+)
+from service.evaluation_export import (
+    evaluation_records_to_csv,
+    evaluation_records_to_jsonl,
 )
 from service.report_store import get_report_payload
 
@@ -35,6 +41,10 @@ class LoginBody(BaseModel):
 
 class TemporaryUserLoginBody(BaseModel):
     temp_user_id: int
+
+
+class TemporaryUserRegisterBody(BaseModel):
+    email: EmailStr
 
 
 class RegisterBody(BaseModel):
@@ -57,6 +67,35 @@ class RatingBody(BaseModel):
     rating: float
     message: str
     sessionIdInt: int
+
+
+class AdvisorReviewBody(BaseModel):
+    message_id: int
+    route_correct: bool | None = None
+    building_data_correct: bool | None = None
+    recommendation_correct: bool | None = None
+    personalized: bool | None = None
+    useful: bool | None = None
+    too_generic: bool | None = None
+    needs_minor_edit: bool | None = None
+    needs_major_edit: bool | None = None
+    unsafe_or_misleading: bool | None = None
+    should_have_asked_clarification: bool | None = None
+    should_have_escalated: bool | None = None
+    technical_correctness_score: float | None = None
+    building_specificity_score: float | None = None
+    personalization_score: float | None = None
+    usefulness_score: float | None = None
+    justification_score: float | None = None
+    clarity_score: float | None = None
+    trust_score: float | None = None
+    safety_score: float | None = None
+    advisor_confidence: float | None = None
+    error_tags: list[str] = Field(default_factory=list)
+    correction_actions: list[dict[str, Any]] = Field(default_factory=list)
+    corrected_answer: str | None = None
+    correction_summary: str | None = None
+    comments: str | None = None
 
 
 # Create a router instance
@@ -112,13 +151,20 @@ async def get_user_by_user_id(
 async def login(request: Request, form_data: OAuth2PasswordRequestForm = Depends()):
     # Fetch user by email
     try:
+        email = _normalize_email(form_data.username)
         user = get_selected_user(
-            column_name="email", filter_value=form_data.username, include_password=True
+            column_name="email", filter_value=email, include_password=True
         )
         print(f"User found: {user}")
 
     except KeyError:
         # no such user
+        raise HTTPException(
+            status_code=401,
+            detail="Incorrect email or password.",
+        )
+
+    if not user.get("password_hash"):
         raise HTTPException(
             status_code=401,
             detail="Incorrect email or password.",
@@ -163,15 +209,21 @@ async def login_temporary_user(request: Request, data: TemporaryUserLoginBody):
         # Fetch user by user_id to validate it exists and check if it's temporary
         temp_user_id = data.temp_user_id
         user = get_selected_user(
-            column_name="user_id", filter_value=temp_user_id, include_password=False
+            column_name="user_id", filter_value=temp_user_id, include_password=True
         )
 
         # Check if this is actually a temporary user
-        # Assuming temporary users don't have email/username/password_hash
-        if user.get("email") or user.get("username") or user.get("password_hash"):
+        # Temporary users have an email, but no username/password credentials yet.
+        if user.get("username") or user.get("password_hash"):
             raise HTTPException(
                 status_code=403,
                 detail="Cannot login as temporary user: This is a regular user account with credentials.",
+            )
+
+        if not user.get("email"):
+            raise HTTPException(
+                status_code=400,
+                detail="Temporary users must have an email address.",
             )
 
     except KeyError:
@@ -183,13 +235,15 @@ async def login_temporary_user(request: Request, data: TemporaryUserLoginBody):
 
     # Create a signed JWT token for the temporary user
     token = auth_service.create_token(
-        user_id=temp_user_id, email="", temporary_user=True
+        user_id=temp_user_id, email=user["email"], temporary_user=True
     )
 
     return {
         "access_token": token,
         "token_type": "bearer",
         "user_id": temp_user_id,
+        "email": user["email"],
+        "username": user.get("username"),
         "temporary_user": True,
     }
 
@@ -199,9 +253,10 @@ async def login_temporary_user(request: Request, data: TemporaryUserLoginBody):
 async def register(request: Request, body: RegisterBody):
     try:
         users = get_users(filter="regular")
+        email = _normalize_email(body.email)
 
         # Check for existing email
-        if any(u["email"].lower() == body.email.lower() for u in users if u["email"]):
+        if any(_normalize_email(u["email"]) == email for u in users if u["email"]):
             raise HTTPException(status_code=400, detail="Email already registered.")
 
         # Hash the password
@@ -209,7 +264,7 @@ async def register(request: Request, body: RegisterBody):
 
         # Insert new user
         new_user_id = insert_user(
-            username=body.username, email=body.email, password=hashed_pw
+            username=body.username, email=email, password=hashed_pw
         )
     except Exception as e:
         raise e
@@ -220,10 +275,35 @@ async def register(request: Request, body: RegisterBody):
 
 @router.post("/user/register/temporary/", tags=["users"])
 @limiter.limit("10/minute")
-async def register_temporary_user(request: Request):
+async def register_temporary_user(request: Request, body: TemporaryUserRegisterBody):
     try:
-        result = insert_empty_user()
-        return result
+        email = _normalize_email(body.email)
+        try:
+            existing_user = get_selected_user(
+                column_name="email", filter_value=email, include_password=True
+            )
+        except KeyError:
+            existing_user = None
+
+        if existing_user:
+            if existing_user.get("username") or existing_user.get("password_hash"):
+                raise HTTPException(
+                    status_code=400,
+                    detail="Email already registered. Please log in instead.",
+                )
+
+            return {
+                "user_id": existing_user["user_id"],
+                "email": _normalize_email(existing_user["email"]),
+                "message": "Temporary user loaded successfully.",
+            }
+
+        user_id = insert_temporary_user(email=email)
+        return {
+            "user_id": user_id,
+            "email": email,
+            "message": "Temporary user created successfully.",
+        }
     except HTTPException as e:
         raise e
     except Exception as e:
@@ -232,25 +312,30 @@ async def register_temporary_user(request: Request):
 
 @router.post("/user/register/temporary-to-regular/{user_id}/", tags=["users"])
 @limiter.limit("10/minute")
-async def register_temporary_user_to_regular(request: Request, body: RegisterBody):
+async def register_temporary_user_to_regular(user_id: int, request: Request, body: RegisterBody):
     try:
         users = get_users(filter="regular")
+        email = _normalize_email(body.email)
 
         # Check for existing email
-        if any(u["email"].lower() == body.email.lower() for u in users if u["email"]):
+        if any(
+            u["user_id"] != user_id and _normalize_email(u["email"]) == email
+            for u in users
+            if u["email"]
+        ):
             raise HTTPException(status_code=400, detail="Email already registered.")
 
         # Hash the password
         hashed_pw = _get_password_hash(body.password)
 
         update_user(
-            user_id=body.user_id,
+            user_id=user_id,
             username=body.username,
-            email=body.email,
+            email=email,
             password=hashed_pw,
         )
 
-        result = {"user_id": body.user_id, "message": "User updated successfully."}
+        result = {"user_id": user_id, "message": "User updated successfully."}
         return result
     except HTTPException as e:
         raise e
@@ -442,7 +527,74 @@ async def download_report(
     )
 
 
+@router.get("/evaluation/export/", tags=["evaluation"])
+async def export_evaluation_records(
+    format: str = "jsonl",
+    user_id: int | None = None,
+    session_id: int | None = None,
+    auth: dict = Depends(auth_service.get_token_data),
+):
+    if auth.get("temporary_user"):
+        raise HTTPException(
+            status_code=403,
+            detail="Temporary users cannot export evaluation records.",
+        )
+
+    export_format = format.strip().lower()
+    records = get_evaluation_records(user_id=user_id, session_id=session_id)
+
+    if export_format == "jsonl":
+        content = evaluation_records_to_jsonl(records)
+        media_type = "application/x-ndjson; charset=utf-8"
+        file_name = "spara-evaluation-records.jsonl"
+    elif export_format == "csv":
+        content = evaluation_records_to_csv(records)
+        media_type = "text/csv; charset=utf-8"
+        file_name = "spara-evaluation-records.csv"
+    else:
+        raise HTTPException(
+            status_code=400,
+            detail="Unsupported export format. Use 'jsonl' or 'csv'.",
+        )
+
+    return Response(
+        content=content,
+        media_type=media_type,
+        headers={
+            "Content-Disposition": f'attachment; filename="{file_name}"',
+            "Cache-Control": "no-store",
+        },
+    )
+
+
+@router.post("/evaluation/advisor-review/", tags=["evaluation"])
+async def save_advisor_review(
+    review: AdvisorReviewBody,
+    auth: dict = Depends(auth_service.get_token_data),
+):
+    if auth.get("temporary_user"):
+        raise HTTPException(
+            status_code=403,
+            detail="Temporary users cannot submit advisor reviews.",
+        )
+
+    try:
+        return upsert_advisor_review(
+            message_id=review.message_id,
+            reviewer_user_id=auth["user_id"],
+            review=review.__dict__,
+        )
+    except psycopg2.errors.ForeignKeyViolation as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        raise e
+
+
 # Helpers
+
+
+def _normalize_email(email: str) -> str:
+    return str(email or "").strip().lower()
 
 
 def _get_password_hash(password: str) -> str:

@@ -61,7 +61,7 @@ class TestCreateToken:
             token, auth_service.JWT_SECRET, algorithms=[auth_service.JWT_ALGORITHM]
         )
         assert payload["user_id"] == 2
-        assert payload["email"] is None
+        assert payload["email"] == "temporary@example.com"
         assert payload["temporary_user"] is True
 
     def test_create_token_has_expiration(self, auth_service):

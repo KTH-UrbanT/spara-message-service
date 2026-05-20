@@ -16,6 +16,31 @@ PUBLIC_MESSAGE_FIELDS = (
     "downloadable_report",
 )
 
+PUBLIC_METADATA_FIELDS = (
+    "route",
+    "agent",
+    "classification",
+    "intent",
+    "intent_list",
+    "needs_clarification",
+    "out_of_scope",
+    "out_of_scope_type",
+    "expert_handoff_triggered",
+    "report_generation_triggered",
+    "evaluation_mode",
+    "building_id",
+    "building_match",
+    "building_identity_check",
+    "retrieved_facts",
+    "vector_sources",
+    "grounding",
+    "data_freshness",
+    "uncertainty",
+    "clarification",
+    "boundary_handling",
+    "safety_boundary",
+)
+
 
 def _coerce_timestamp(value: Any) -> Optional[int]:
     if value in (None, ""):
@@ -40,6 +65,21 @@ def _coerce_timestamp(value: Any) -> Optional[int]:
     return None
 
 
+def _is_present(value: Any) -> bool:
+    return value not in (None, "", [], {})
+
+
+def _public_metadata(metadata: Any) -> Dict[str, Any]:
+    if not isinstance(metadata, dict):
+        return {}
+
+    return {
+        field: metadata[field]
+        for field in PUBLIC_METADATA_FIELDS
+        if field in metadata and _is_present(metadata[field])
+    }
+
+
 def to_public_message_payload(message: Dict[str, Any]) -> Dict[str, Any]:
     message = message or {}
     public_payload: Dict[str, Any] = {}
@@ -57,6 +97,10 @@ def to_public_message_payload(message: Dict[str, Any]) -> Dict[str, Any]:
         value = message.get(field)
         if value is not None:
             public_payload[field] = value
+
+    metadata = _public_metadata(message.get("metadata"))
+    if metadata:
+        public_payload["metadata"] = metadata
 
     return public_payload
 

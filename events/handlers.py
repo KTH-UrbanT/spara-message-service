@@ -5,6 +5,7 @@ import time
 from service.redis import insert_into_redis_client
 from service.database import (
     get_selected_messages,
+    get_selected_user,
     insert_session,
     insert_messages,
     update_session,
@@ -14,6 +15,60 @@ from service.public_messages import (
     to_public_message_payload,
 )
 from datetime import datetime, timezone
+
+
+def _normalize_email(email):
+    return str(email or "").strip().lower()
+
+
+def _extract_email_from_thread_id(thread_id):
+    if not thread_id or ":" not in str(thread_id):
+        return None
+    candidate = str(thread_id).split(":", 1)[0].strip().lower()
+    return candidate if "@" in candidate else None
+
+
+def _resolve_user_email(user_id=None, provided_email=None, thread_id=None):
+    if user_id:
+        try:
+            user = get_selected_user(column_name="user_id", filter_value=int(user_id))
+            if user.get("email"):
+                return _normalize_email(user["email"])
+        except Exception as exc:
+            print("Could not resolve user email from database:", exc)
+
+    email = _normalize_email(provided_email)
+    if email:
+        return email
+
+    return _extract_email_from_thread_id(thread_id)
+
+
+def _build_thread_id(user_email, session_id):
+    email = _normalize_email(user_email)
+    if not email:
+        raise ValueError("Email is required to create a chat thread.")
+
+    session_id = str(session_id or "").strip()
+    if not session_id:
+        raise ValueError("Session ID is required to create a chat thread.")
+
+    prefix = f"{email}:"
+    if session_id.lower().startswith(prefix):
+        return session_id
+    return f"{email}:{session_id}"
+
+
+def _store_thread_metadata(thread_id, user_email=None, user_id=None, session_id_int=None):
+    mapping = {}
+    if user_email:
+        mapping["user_email"] = _normalize_email(user_email)
+    if user_id is not None:
+        mapping["user_id"] = str(user_id)
+    if session_id_int is not None:
+        mapping["session_id_int"] = str(session_id_int)
+    if mapping:
+        redis_client.hset(f"thread:{thread_id}:meta", mapping=mapping)
 
 
 @sio.event
@@ -36,14 +91,33 @@ async def connect(sid, environ, auth):
         print("Authentication failed for client: ", sid)
         return False  # Reject the connection if no auth is provided
 
+    session_id = None
     if (
         "session_id" in auth
         and auth.get("session_id")
         and "session_id_int" in auth
         and auth.get("session_id_int")
     ):
-        session_id = auth["session_id"]
+        user_email = _resolve_user_email(
+            user_id=auth.get("user_id"),
+            provided_email=auth.get("email"),
+            thread_id=auth.get("session_id"),
+        )
+        if not user_email:
+            print("Authentication failed for client without email:", sid, auth)
+            return False
+
+        session_id = _build_thread_id(user_email, auth["session_id"])
         sio.enter_room(sid, session_id)
+        await sio.save_session(
+            sid,
+            {
+                "session_id": session_id,
+                "session_id_int": auth["session_id_int"],
+                "user_id": auth.get("user_id"),
+                "email": user_email,
+            },
+        )
         print("Client connected:", sid, auth)
 
         messages_list = []
@@ -60,9 +134,15 @@ async def connect(sid, environ, auth):
             redis_client=redis_client,
             thread_id=session_id,
         )
+        _store_thread_metadata(
+            thread_id=session_id,
+            user_email=user_email,
+            user_id=auth.get("user_id"),
+            session_id_int=auth.get("session_id_int"),
+        )
 
     # Update the session with the latest messages
-    await session_updated(session_id=auth.get("session_id"), room=sid)
+    await session_updated(session_id=session_id, room=sid)
 
 
 @sio.event
@@ -102,7 +182,7 @@ async def disconnect(sid):
 
 
 @sio.event
-async def establish_session(sid, session_id, session_id_int, user_id):
+async def establish_session(sid, session_id, session_id_int, user_id, user_email=None):
     """Establish a session socket id pair for the client and store details in socket.
 
     Args:
@@ -110,19 +190,28 @@ async def establish_session(sid, session_id, session_id_int, user_id):
         session_id (str): The session ID for the current conversation.
         session_id_int (int): The integer session ID from DB.
         user_id (str): The ID of the user client.
+        user_email (str, optional): The email identity for Redis thread keys.
     """
+    resolved_email = _resolve_user_email(
+        user_id=user_id,
+        provided_email=user_email,
+        thread_id=session_id,
+    )
+    thread_id = _build_thread_id(resolved_email, session_id)
     await sio.save_session(
         sid,
         {
-            "session_id": session_id,
+            "session_id": thread_id,
             "session_id_int": session_id_int,
             "user_id": user_id,
+            "email": resolved_email,
         },
     )
+    _store_thread_metadata(thread_id, resolved_email, user_id, session_id_int)
 
 
 @sio.event  #här ska det fixas
-async def create_session(sid, message, user_id=None):
+async def create_session(sid, message, user_id=None, user_email=None):
     """Create a new session for the user and store it in the database.
 
     This function is called when a new session is initiated by the client
@@ -133,6 +222,7 @@ async def create_session(sid, message, user_id=None):
         sid (str): The socket session ID of the client.
         message (str): The initial message or context for the session.
         user_id (str, optional): The ID of the user creating the session.
+        user_email (str, optional): The email identity for Redis thread keys.
     """
     try:
         if not user_id:
@@ -140,10 +230,27 @@ async def create_session(sid, message, user_id=None):
             await sio.emit("error_message", {"error": "User ID is required."}, room=sid)
             return
 
+        resolved_email = _resolve_user_email(user_id=user_id, provided_email=user_email)
+        if not resolved_email:
+            print("Email is required to create a session.")
+            await sio.emit("error_message", {"error": "Email is required."}, room=sid)
+            return
+
+        session_id = _build_thread_id(resolved_email, sid)
+
         session_id_int = insert_session(
-            user_id=user_id, session_token=sid, is_active=True
+            user_id=user_id, session_token=session_id, is_active=True
         )
-        session_id = str(sid)
+        await sio.save_session(
+            sid,
+            {
+                "session_id": session_id,
+                "session_id_int": session_id_int,
+                "user_id": user_id,
+                "email": resolved_email,
+            },
+        )
+        _store_thread_metadata(session_id, resolved_email, user_id, session_id_int)
 
         await sio.emit(
             "session_created",
@@ -196,7 +303,21 @@ async def send_message(sid, data, session_id, session_id_int):
             )
             return
 
+        socket_auth = await sio.get_session(sid) or {}
+        user_email = _resolve_user_email(
+            user_id=socket_auth.get("user_id"),
+            provided_email=socket_auth.get("email"),
+            thread_id=session_id,
+        )
+        session_id = _build_thread_id(user_email, session_id)
+
         print("SEND_MESSAGE to thread: ", session_id, "session_id_int:", session_id_int)
+        _store_thread_metadata(
+            thread_id=session_id,
+            user_email=user_email,
+            user_id=socket_auth.get("user_id"),
+            session_id_int=session_id_int,
+        )
 
         message_dict = {
             "content": data,
@@ -275,7 +396,7 @@ async def send_message(sid, data, session_id, session_id_int):
                 "metadata": {},
                 "evidence": [],
             }
-            redis_client.rpush(session_id, json.dumps(response_message))
+            redis_client.rpush(thread_name, json.dumps(response_message))
 
         # Insert response message into the database
         insert_messages(

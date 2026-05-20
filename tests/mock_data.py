@@ -17,7 +17,7 @@ MOCK_USER_REGULAR: Dict[str, Any] = {
 MOCK_USER_TEMP: Dict[str, Any] = {
     "user_id": 2,
     "username": None,
-    "email": None,
+    "email": "temporary@example.com",
     "password_hash": None,
     "created_at": "2024-01-01T00:00:00",
     "last_logged_in": None,
