@@ -585,9 +585,13 @@ def get_selected_messages(column_name: str, filter_value: int) -> list[Message]:
         observability_ready = ensure_message_observability_schema()
         connection = get_connection()
         cursor = connection.cursor()
-        metadata_select = "m.metadata" if observability_ready else "'{}'::jsonb AS metadata"
+        metadata_select = (
+            sql.SQL("m.metadata")
+            if observability_ready
+            else sql.SQL("'{}'::jsonb AS metadata")
+        )
         query = sql.SQL(
-            f"""
+            """
             SELECT
                 m.message_id,
                 m.session_id,
@@ -604,7 +608,10 @@ def get_selected_messages(column_name: str, filter_value: int) -> list[Message]:
             WHERE m.{column} = %s
             ORDER BY m.sent_at ASC, m.message_id ASC;
             """
-        ).format(column=sql.Identifier(column_name))
+        ).format(
+            metadata_select=metadata_select,
+            column=sql.Identifier(column_name),
+        )
         cursor.execute(query, (filter_value,))
         message_rows = cursor.fetchall()
 

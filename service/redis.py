@@ -89,7 +89,6 @@ def insert_into_redis_client(conversation_list, redis_client, thread_id):
     )
     for msg in sorted_conversation_list:
         redis_client.rpush(thread_name, json.dumps(msg))
-        redis_client.publish("thread_events", json.dumps(msg))
 
     latest_metadata = {}
     for msg in reversed(conversation_list):

@@ -54,6 +54,7 @@ def test_insert_into_redis_client_restores_message_metadata_and_thread_meta():
 
     stored_messages = redis_client.lists["thread:thread-1:messages"]
     assert len(stored_messages) == 1
+    assert redis_client.published == []
     payload = json.loads(stored_messages[0])
     assert payload["metadata"] == {
         "route": "generic",

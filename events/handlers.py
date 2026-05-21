@@ -71,6 +71,25 @@ def _store_thread_metadata(thread_id, user_email=None, user_id=None, session_id_
         redis_client.hset(f"thread:{thread_id}:meta", mapping=mapping)
 
 
+def _decode_redis_value(value):
+    if isinstance(value, bytes):
+        return value.decode("utf-8")
+    return value
+
+
+def _get_thread_metadata(thread_id):
+    try:
+        raw_metadata = redis_client.hgetall(f"thread:{thread_id}:meta") or {}
+    except Exception as exc:
+        print("Could not read thread metadata from Redis:", exc)
+        return {}
+
+    return {
+        str(_decode_redis_value(key)): _decode_redis_value(value)
+        for key, value in raw_metadata.items()
+    }
+
+
 @sio.event
 async def connect(sid, environ, auth):
     """Handle client connection and authenticate the session.
@@ -198,6 +217,15 @@ async def establish_session(sid, session_id, session_id_int, user_id, user_email
         thread_id=session_id,
     )
     thread_id = _build_thread_id(resolved_email, session_id)
+    previous_auth = await sio.get_session(sid) or {}
+    previous_thread_id = previous_auth.get("session_id")
+    if previous_thread_id and previous_thread_id != thread_id:
+        try:
+            await sio.leave_room(sid, previous_thread_id)
+        except Exception as exc:
+            print("Could not leave previous room:", exc)
+
+    await sio.enter_room(sid, thread_id)
     await sio.save_session(
         sid,
         {
@@ -208,6 +236,20 @@ async def establish_session(sid, session_id, session_id_int, user_id, user_email
         },
     )
     _store_thread_metadata(thread_id, resolved_email, user_id, session_id_int)
+    messages_list = []
+    try:
+        messages_list = get_selected_messages(
+            column_name="session_id", filter_value=int(session_id_int)
+        )
+    except Exception as exc:
+        print("Error fetching messages while establishing session:", exc)
+
+    insert_into_redis_client(
+        conversation_list=messages_list,
+        redis_client=redis_client,
+        thread_id=thread_id,
+    )
+    await session_updated(session_id=thread_id, room=sid)
 
 
 @sio.event  #här ska det fixas
@@ -447,6 +489,25 @@ async def session_updated(session_id, room=None):
     else:
         thread_name = f"thread:{session_id}:messages"
         messages = redis_client.lrange(thread_name, 0, -1)
+        if not messages:
+            thread_metadata = _get_thread_metadata(session_id)
+            session_id_int = thread_metadata.get("session_id_int")
+            if session_id_int:
+                try:
+                    messages_from_database = get_selected_messages(
+                        column_name="session_id",
+                        filter_value=int(session_id_int),
+                    )
+                    if messages_from_database:
+                        insert_into_redis_client(
+                            conversation_list=messages_from_database,
+                            redis_client=redis_client,
+                            thread_id=session_id,
+                        )
+                        messages = redis_client.lrange(thread_name, 0, -1)
+                except Exception as exc:
+                    print("Error hydrating empty Redis thread from database:", exc)
+
         decoded_messages = [json.loads(message) for message in messages]
         messages_list = to_public_message_list(decoded_messages)
         # print("Messages in Redis for session:", session_id, messages_list) # Debugging line
