@@ -60,6 +60,35 @@ def test_to_public_message_payload_supports_datetime_sent_at():
     assert "metadata" not in payload
 
 
+def test_to_public_message_payload_keeps_session_memory_metadata():
+    payload = to_public_message_payload(
+        {
+            "message_id": 5,
+            "role": "assistant",
+            "content": "Answer",
+            "timestamp": 1710000000,
+            "metadata": {
+                "address": "Artemisgatan 17",
+                "address_from_user": "Artemisgatan 17",
+                "requested_address": "Artemisgatan 17",
+                "epc_record_address": "Artemisgatan 13",
+                "same_building_multiple_addresses": True,
+                "address_context_note": "Same building ID with multiple registered addresses.",
+                "sql_trace": {"query": "internal"},
+            },
+        }
+    )
+
+    assert payload["metadata"] == {
+        "address": "Artemisgatan 17",
+        "address_from_user": "Artemisgatan 17",
+        "requested_address": "Artemisgatan 17",
+        "epc_record_address": "Artemisgatan 13",
+        "same_building_multiple_addresses": True,
+        "address_context_note": "Same building ID with multiple registered addresses.",
+    }
+
+
 def test_to_public_message_list_filters_system_messages():
     payloads = to_public_message_list(
         [

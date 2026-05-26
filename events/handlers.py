@@ -15,6 +15,25 @@ from service.public_messages import (
     to_public_message_payload,
 )
 from datetime import datetime, timezone
+import re
+
+
+GENERIC_PROGRESS_STEPS = (
+    (1, "processing", "Reading your question..."),
+    (6, "retrieving", "Looking at relevant documents..."),
+    (16, "composing", "Preparing the answer..."),
+    (40, "working", "Still working on it..."),
+    (80, "working", "This is taking longer than usual, but I am still working..."),
+)
+
+
+BUILDING_PROGRESS_STEPS = (
+    (1, "processing", "Reading your question and checking building context..."),
+    (6, "resolving", "Looking up the BRF or building details..."),
+    (16, "retrieving", "Retrieving building data and advisory sources..."),
+    (40, "composing", "Preparing a building-specific answer..."),
+    (80, "working", "This building-specific query is taking longer than usual, but I am still working..."),
+)
 
 
 def _normalize_email(email):
@@ -71,6 +90,95 @@ def _store_thread_metadata(thread_id, user_email=None, user_id=None, session_id_
         redis_client.hset(f"thread:{thread_id}:meta", mapping=mapping)
 
 
+ADDRESS_CUE_RE = re.compile(
+    r"\b(?:i\s+live\s+(?:in|at|on)|we\s+live\s+(?:in|at|on)|my\s+address\s+is|"
+    r"our\s+address\s+is|address\s+is|jag\s+bor\s+p[åa]|vi\s+bor\s+p[åa]|"
+    r"min\s+adress\s+[äa]r|adressen\s+[äa]r)\b",
+    flags=re.IGNORECASE,
+)
+
+COMPACT_ADDRESS_RE = re.compile(
+    r"\b[A-Za-zÅÄÖåäö][A-Za-zÅÄÖåäö .'\-]{2,}\s+\d{1,4}[A-Za-z]?\b",
+    flags=re.IGNORECASE,
+)
+
+BRF_CUE_RE = re.compile(
+    r"\b(?:brf|bostadsr[äa]ttsf[öo]reningen|bostadsrattsforeningen)\s+[A-Za-zÅÄÖåäö0-9]",
+    flags=re.IGNORECASE,
+)
+
+BUILDING_CONTEXT_RE = re.compile(
+    r"\b(?:my|our|this|the)\s+(?:building|property|brf|address)\b|"
+    r"\b(?:min|v[åa]r|denna)\s+(?:byggnad|fastighet|brf|adress)\b",
+    flags=re.IGNORECASE,
+)
+
+BUILDING_DATA_RE = re.compile(
+    r"\b(?:ventilation|energy\s+class|energiklass|energy\s+rating|energy\s+performance|"
+    r"energiprestanda|heating\s+system|district\s+heating|ecms?|measures?|åtgärder?)\b",
+    flags=re.IGNORECASE,
+)
+
+EXPLICIT_GENERAL_RE = re.compile(
+    r"\b(?:in\s+general|generally|general\s+tips?|what\s+is|what\s+are|explain)\b",
+    flags=re.IGNORECASE,
+)
+
+
+def _metadata_has_building_context(metadata):
+    stack = [metadata]
+    while stack:
+        current = stack.pop()
+        if isinstance(current, dict):
+            lower_keys = {str(key).lower() for key in current.keys()}
+            if lower_keys.intersection({"address", "address_from_user", "byggnadsid", "building_id", "selected_brf_building_id"}):
+                return True
+            stack.extend(current.values())
+        elif isinstance(current, list):
+            stack.extend(current)
+    return False
+
+
+def _looks_like_building_status_request(message, metadata=None):
+    text = str(message or "")
+    if not text.strip():
+        return False
+    if BRF_CUE_RE.search(text) or ADDRESS_CUE_RE.search(text):
+        return True
+    if COMPACT_ADDRESS_RE.search(text) and not EXPLICIT_GENERAL_RE.search(text):
+        return True
+    if BUILDING_CONTEXT_RE.search(text) and BUILDING_DATA_RE.search(text):
+        return True
+    if _metadata_has_building_context(metadata) and BUILDING_DATA_RE.search(text) and not EXPLICIT_GENERAL_RE.search(text):
+        return True
+    return False
+
+
+def _progress_steps_for_message(message, metadata=None):
+    return BUILDING_PROGRESS_STEPS if _looks_like_building_status_request(message, metadata) else GENERIC_PROGRESS_STEPS
+
+
+def _progress_step_at_retry(message, retry_count, metadata=None):
+    for retry_at, status, text in _progress_steps_for_message(message, metadata):
+        if retry_count == retry_at:
+            return status, text
+    return None
+
+
+async def _emit_processing_status(room, session_id, session_id_int, status, message):
+    await sio.emit(
+        "processing_status",
+        {
+            "session_id": session_id,
+            "session_id_int": session_id_int,
+            "status": status,
+            "message": message,
+            "timestamp": time.time(),
+        },
+        room=room,
+    )
+
+
 def _decode_redis_value(value):
     if isinstance(value, bytes):
         return value.decode("utf-8")
@@ -88,6 +196,39 @@ def _get_thread_metadata(thread_id):
         str(_decode_redis_value(key)): _decode_redis_value(value)
         for key, value in raw_metadata.items()
     }
+
+
+def _hydrate_thread_from_database(thread_id, session_id_int):
+    if not thread_id or not session_id_int:
+        return []
+
+    thread_name = f"thread:{thread_id}:messages"
+    try:
+        if redis_client.lrange(thread_name, 0, -1):
+            return []
+    except Exception as exc:
+        print("Could not check Redis thread before hydration:", exc)
+        return []
+
+    try:
+        messages_from_database = get_selected_messages(
+            column_name="session_id",
+            filter_value=int(session_id_int),
+        )
+        if messages_from_database:
+            insert_into_redis_client(
+                conversation_list=messages_from_database,
+                redis_client=redis_client,
+                thread_id=thread_id,
+            )
+            print(
+                f"Hydrated Redis thread {thread_id} from database "
+                f"with {len(messages_from_database)} messages."
+            )
+        return messages_from_database
+    except Exception as exc:
+        print("Error hydrating Redis thread from database:", exc)
+        return []
 
 
 @sio.event
@@ -139,20 +280,7 @@ async def connect(sid, environ, auth):
         )
         print("Client connected:", sid, auth)
 
-        messages_list = []
-
-        try:
-            messages_list = get_selected_messages(
-                column_name="session_id", filter_value=auth["session_id_int"]
-            )
-        except Exception as e:
-            print("Error fetching messages:", e)
-
-        insert_into_redis_client(
-            conversation_list=messages_list,
-            redis_client=redis_client,
-            thread_id=session_id,
-        )
+        _hydrate_thread_from_database(session_id, auth["session_id_int"])
         _store_thread_metadata(
             thread_id=session_id,
             user_email=user_email,
@@ -236,19 +364,7 @@ async def establish_session(sid, session_id, session_id_int, user_id, user_email
         },
     )
     _store_thread_metadata(thread_id, resolved_email, user_id, session_id_int)
-    messages_list = []
-    try:
-        messages_list = get_selected_messages(
-            column_name="session_id", filter_value=int(session_id_int)
-        )
-    except Exception as exc:
-        print("Error fetching messages while establishing session:", exc)
-
-    insert_into_redis_client(
-        conversation_list=messages_list,
-        redis_client=redis_client,
-        thread_id=thread_id,
-    )
+    _hydrate_thread_from_database(thread_id, session_id_int)
     await session_updated(session_id=thread_id, room=sid)
 
 
@@ -360,6 +476,7 @@ async def send_message(sid, data, session_id, session_id_int):
             user_id=socket_auth.get("user_id"),
             session_id_int=session_id_int,
         )
+        _hydrate_thread_from_database(session_id, session_id_int)
 
         message_dict = {
             "content": data,
@@ -388,6 +505,13 @@ async def send_message(sid, data, session_id, session_id_int):
         )
 
         await session_updated(session_id, room=sid)
+        await _emit_processing_status(
+            sid,
+            session_id,
+            session_id_int,
+            "queued",
+            "Sending your question to SPARA...",
+        )
 
         # Notify Redis queue manager to process the message
         event_data = json.dumps({"event": "message_added", "session_id_int": session_id_int, "thread_name": session_id })
@@ -397,11 +521,22 @@ async def send_message(sid, data, session_id, session_id_int):
 
         # Wait for the reply from the Redis queue
         retry_count = 0
-        max_retries = 100  # Adjust this based on expected processing time
+        max_retries = 240  # 0.5s intervals, up to roughly two minutes
         response_message = None
 
         while retry_count < max_retries:
-            await asyncio.sleep(10)  # Check every 0.5 seconds
+            await asyncio.sleep(0.5)
+            progress_step = _progress_step_at_retry(data, retry_count, _get_thread_metadata(session_id))
+            if progress_step:
+                progress_status, progress_message = progress_step
+                await _emit_processing_status(
+                    sid,
+                    session_id,
+                    session_id_int,
+                    progress_status,
+                    progress_message,
+                )
+
             messages = redis_client.lrange(thread_name, 0, -1)
 
             if len(messages) > 1:  # Check if a response message has been added
@@ -457,6 +592,13 @@ async def send_message(sid, data, session_id, session_id_int):
         )
 
         await session_updated(session_id, room=sid)
+        await _emit_processing_status(
+            sid,
+            session_id,
+            session_id_int,
+            "done",
+            "",
+        )
 
         # Emit the response back to the client
         # print("Redis client:", redis_client) # Debugging line
@@ -469,6 +611,10 @@ async def send_message(sid, data, session_id, session_id_int):
 
     except Exception as e:
         print("Error processing message:", e)
+        try:
+            await _emit_processing_status(sid, session_id, session_id_int, "done", "")
+        except Exception:
+            pass
         await sio.emit("error_message", {"error": str(e)}, room=sid)
 
 
@@ -493,20 +639,8 @@ async def session_updated(session_id, room=None):
             thread_metadata = _get_thread_metadata(session_id)
             session_id_int = thread_metadata.get("session_id_int")
             if session_id_int:
-                try:
-                    messages_from_database = get_selected_messages(
-                        column_name="session_id",
-                        filter_value=int(session_id_int),
-                    )
-                    if messages_from_database:
-                        insert_into_redis_client(
-                            conversation_list=messages_from_database,
-                            redis_client=redis_client,
-                            thread_id=session_id,
-                        )
-                        messages = redis_client.lrange(thread_name, 0, -1)
-                except Exception as exc:
-                    print("Error hydrating empty Redis thread from database:", exc)
+                _hydrate_thread_from_database(session_id, session_id_int)
+                messages = redis_client.lrange(thread_name, 0, -1)
 
         decoded_messages = [json.loads(message) for message in messages]
         messages_list = to_public_message_list(decoded_messages)
