@@ -1,4 +1,5 @@
 import base64
+from datetime import datetime, timezone
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Depends, Request, Response
@@ -22,6 +23,7 @@ from service.database import (
     get_evaluation_records,
     upsert_advisor_review,
     insert_messages,
+    update_session,
     Message,
     insert_rating,
     check_rating_exists,
@@ -384,6 +386,46 @@ async def create_session(
         )
         return result
     except psycopg2.errors.ForeignKeyViolation as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        raise e
+
+
+@router.patch("/session/{session_id}/active/", tags=["sessions"])
+async def update_session_active_state(
+    session_id: int,
+    is_active: bool,
+    auth: dict = Depends(auth_service.get_token_data),
+):
+    try:
+        session = get_selected_session(
+            column_name="session_id",
+            filter_value=session_id,
+        )
+        if not session:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Session {session_id} not found.",
+            )
+
+        session_owner_id = session[0]["user_id"]
+        _ensure_user(session_owner_id, auth)
+
+        timestamp = datetime.now(timezone.utc).isoformat()
+        update_session(
+            session_id=session_id,
+            last_access_time=timestamp,
+            is_active=is_active,
+        )
+
+        return {
+            **session[0],
+            "is_active": is_active,
+            "last_accessed": timestamp,
+        }
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except KeyError as e:
         raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
         raise e

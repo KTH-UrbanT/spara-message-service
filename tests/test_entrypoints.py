@@ -400,6 +400,49 @@ class TestSessionEndpoints:
         assert response.json() == 103
         mock_insert_session.assert_called_once()
 
+    @patch("service.entrypoints.update_session")
+    @patch("service.entrypoints.get_selected_session")
+    def test_update_session_active_state_success(
+        self, mock_get_selected_session, mock_update_session
+    ):
+        """Test deactivating and reactivating a session owned by the user."""
+        mock_get_selected_session.return_value = [MOCK_SESSION]
+        token = create_test_token(
+            user_id=1, email="test@example.com", temporary_user=False
+        )
+
+        response = client.patch(
+            "/session/100/active/",
+            params={"is_active": False},
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+        assert response.status_code == 200
+        assert response.json()["session_id"] == 100
+        assert response.json()["is_active"] is False
+        mock_update_session.assert_called_once()
+
+    @patch("service.entrypoints.get_selected_session")
+    def test_update_session_active_state_forbidden_for_other_user(
+        self, mock_get_selected_session
+    ):
+        """Test changing another user's session is forbidden."""
+        mock_get_selected_session.return_value = [
+            {"session_id": 200, "user_id": 3, "is_active": True}
+        ]
+        token = create_test_token(
+            user_id=1, email="test@example.com", temporary_user=False
+        )
+
+        response = client.patch(
+            "/session/200/active/",
+            params={"is_active": False},
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+        assert response.status_code == 403
+        assert "Forbidden" in response.json()["detail"]
+
 
 # ============================================
 # SESSION ENDPOINT TESTS - AUTHENTICATION ERRORS

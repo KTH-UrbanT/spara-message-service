@@ -5,6 +5,7 @@ import time
 from service.redis import insert_into_redis_client
 from service.database import (
     get_selected_messages,
+    get_selected_session,
     get_selected_user,
     insert_session,
     insert_messages,
@@ -458,6 +459,25 @@ async def send_message(sid, data, session_id, session_id_int):
         if not session_id_int:
             await sio.emit(
                 "error_message", {"error": "Session ID integer is required."}, room=sid
+            )
+            return
+
+        session_records = get_selected_session(
+            column_name="session_id",
+            filter_value=int(session_id_int),
+        )
+        if not session_records:
+            await sio.emit(
+                "error_message",
+                {"error": "This chat session could not be found."},
+                room=sid,
+            )
+            return
+        if session_records[0].get("is_active") is False:
+            await sio.emit(
+                "error_message",
+                {"error": "This chat session is inactive. Reactivate it before sending a new message."},
+                room=sid,
             )
             return
 
