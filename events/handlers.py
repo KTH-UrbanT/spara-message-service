@@ -203,14 +203,6 @@ def _hydrate_thread_from_database(thread_id, session_id_int):
     if not thread_id or not session_id_int:
         return []
 
-    thread_name = f"thread:{thread_id}:messages"
-    try:
-        if redis_client.lrange(thread_name, 0, -1):
-            return []
-    except Exception as exc:
-        print("Could not check Redis thread before hydration:", exc)
-        return []
-
     try:
         messages_from_database = get_selected_messages(
             column_name="session_id",
@@ -223,7 +215,7 @@ def _hydrate_thread_from_database(thread_id, session_id_int):
                 thread_id=thread_id,
             )
             print(
-                f"Hydrated Redis thread {thread_id} from database "
+                f"Synced Redis thread {thread_id} from database "
                 f"with {len(messages_from_database)} messages."
             )
         return messages_from_database

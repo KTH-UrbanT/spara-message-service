@@ -66,3 +66,45 @@ def test_insert_into_redis_client_restores_message_metadata_and_thread_meta():
         "agent": "GenericAgent",
         "evaluation_mode": "true",
     }
+
+
+def test_insert_into_redis_client_merges_rating_for_existing_message():
+    redis_client = FakeRedisClient()
+    sent_at = datetime(2024, 1, 1, tzinfo=timezone.utc)
+    thread_name = "thread:thread-1:messages"
+    redis_client.rpush(
+        thread_name,
+        json.dumps(
+            {
+                "message_id": 2,
+                "role": "assistant",
+                "content": "Hi there!",
+                "timestamp": int(sent_at.timestamp()),
+                "rating_id": None,
+                "rating": None,
+                "version": None,
+                "metadata": {"route": "generic"},
+            }
+        ),
+    )
+    messages = [
+        {
+            "message_id": 2,
+            "role": "assistant",
+            "content": "Hi there!",
+            "sent_at": sent_at,
+            "rating_id": 8,
+            "rating": 4.5,
+            "version": "GROUP-A",
+            "metadata": {"route": "generic"},
+        }
+    ]
+
+    insert_into_redis_client(messages, redis_client, "thread-1")
+
+    stored_messages = redis_client.lists[thread_name]
+    assert len(stored_messages) == 1
+    payload = json.loads(stored_messages[0])
+    assert payload["rating_id"] == 8
+    assert payload["rating"] == 4.5
+    assert payload["version"] == "GROUP-A"

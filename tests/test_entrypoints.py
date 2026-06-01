@@ -847,6 +847,59 @@ class TestRatingEndpoints:
         assert response.json()["message_id"] == 2
         mock_update_rating.assert_called_once()
 
+    @patch("service.entrypoints.get_selected_session")
+    @patch("service.entrypoints.get_selected_messages")
+    @patch("service.entrypoints.check_rating_exists")
+    @patch("service.entrypoints.insert_rating")
+    def test_send_rating_prefers_message_id_over_duplicate_content(
+        self,
+        mock_insert_rating,
+        mock_check_rating_exists,
+        mock_get_selected_messages,
+        mock_get_selected_session,
+    ):
+        """Test rating by message ID so duplicate answer text is not mismatched."""
+        mock_get_selected_session.return_value = [MOCK_SESSION]
+        mock_get_selected_messages.return_value = [
+            {
+                "message_id": 2,
+                "session_id": 100,
+                "role": "assistant",
+                "content": "Same answer",
+                "sent_at": "2024-01-01T00:00:01",
+            },
+            {
+                "message_id": 5,
+                "session_id": 100,
+                "role": "assistant",
+                "content": "Same answer",
+                "sent_at": "2024-01-01T00:00:02",
+            },
+        ]
+        mock_check_rating_exists.return_value = None
+        mock_insert_rating.return_value = 9
+        token = create_test_token(
+            user_id=1, email="test@example.com", temporary_user=False
+        )
+
+        response = client.post(
+            "/rating/",
+            json={
+                "userId": 1,
+                "rating": 3.0,
+                "message": "Same answer",
+                "messageId": 5,
+                "sessionIdInt": 100,
+            },
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+        assert response.status_code == 200
+        assert response.json()["rating_id"] == 9
+        assert response.json()["message_id"] == 5
+        mock_check_rating_exists.assert_called_once_with(5)
+        mock_insert_rating.assert_called_once()
+
 
 # ============================================
 # RATING ENDPOINT TESTS - AUTHENTICATION ERRORS

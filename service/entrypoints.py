@@ -67,8 +67,9 @@ class MessageBody(BaseModel):
 class RatingBody(BaseModel):
     userId: int
     rating: float
-    message: str
+    message: str | None = None
     sessionIdInt: int
+    messageId: int | None = None
 
 
 class AdvisorReviewBody(BaseModel):
@@ -497,11 +498,26 @@ async def send_rating(
     # version=os.getenv("VERSION_NUMBER", "0.5.0")
     messages = await get_messages_by_session_id(ratingbody.sessionIdInt, auth)
 
-    # TODO: change message lookup to use message_id instead of content
-    # Filter out the message with the same content as ratingbody.message
-    target_message = next(
-        (m for m in messages if m["content"] == ratingbody.message), None
-    )
+    if ratingbody.messageId is not None:
+        target_message = next(
+            (
+                m
+                for m in messages
+                if m.get("message_id") == ratingbody.messageId
+                and m.get("role") == "assistant"
+            ),
+            None,
+        )
+    else:
+        target_message = next(
+            (
+                m
+                for m in reversed(messages)
+                if m.get("content") == ratingbody.message
+                and m.get("role") == "assistant"
+            ),
+            None,
+        )
     if not target_message:
         raise HTTPException(status_code=404, detail="Message not found for rating.")
     message_id = target_message["message_id"]
