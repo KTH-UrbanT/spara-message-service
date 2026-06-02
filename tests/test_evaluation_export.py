@@ -33,12 +33,22 @@ def test_evaluation_records_to_csv_flattens_structured_fields_as_json():
     payload = evaluation_records_to_csv(
         [
             {
+                "session_join_key": "spara-session-1",
+                "message_join_key": "spara-session-1-answer-12",
                 "session_id": 1,
+                "thread_id": "test@example.com:session-token",
                 "answer_message_id": 12,
                 "user_message": "What is our energy class?",
                 "assistant_content": "Energy class D",
                 "route": "building_specific",
                 "rating": 4,
+                "building_id": "01-80-EXAMPLE-1",
+                "byggnadsid": "01-80-EXAMPLE-1",
+                "address_used": "Examplegatan 1",
+                "requested_address": "Examplegatan 1",
+                "address_from_user": "Examplegatan 1",
+                "epc_record_address": "Examplegatan 3",
+                "same_building_multiple_addresses": True,
                 "building_match": {"matched_address": "Examplegatan 1"},
                 "retrieved_facts": {"energy_class": "D"},
                 "grounding": {
@@ -107,9 +117,19 @@ def test_evaluation_records_to_csv_flattens_structured_fields_as_json():
     )
 
     rows = list(csv.DictReader(StringIO(payload)))
+    assert rows[0]["session_join_key"] == "spara-session-1"
+    assert rows[0]["message_join_key"] == "spara-session-1-answer-12"
     assert rows[0]["session_id"] == "1"
+    assert rows[0]["thread_id"] == "test@example.com:session-token"
     assert rows[0]["route"] == "building_specific"
     assert rows[0]["rating"] == "4"
+    assert rows[0]["building_id"] == "01-80-EXAMPLE-1"
+    assert rows[0]["byggnadsid"] == "01-80-EXAMPLE-1"
+    assert rows[0]["address_used"] == "Examplegatan 1"
+    assert rows[0]["requested_address"] == "Examplegatan 1"
+    assert rows[0]["address_from_user"] == "Examplegatan 1"
+    assert rows[0]["epc_record_address"] == "Examplegatan 3"
+    assert rows[0]["same_building_multiple_addresses"] == "True"
     assert rows[0]["route_correct"] == "True"
     assert rows[0]["grounding_status"] == "needs_review"
     assert rows[0]["claim_count"] == "3"

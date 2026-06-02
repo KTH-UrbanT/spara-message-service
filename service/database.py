@@ -912,9 +912,36 @@ def get_evaluation_records(
             safety_boundary = _safety_boundary_from_metadata(metadata)
             advisor_review = _normalize_json_value(row[14], {})
             evidence = _normalize_json_value(row[15], [])
+            building_match = metadata.get("building_match") or {}
+            retrieved_facts = metadata.get("retrieved_facts") or {}
+            byggnadsid = (
+                metadata.get("byggnadsid")
+                or metadata.get("selected_brf_building_id")
+                or metadata.get("building_id_from_user")
+                or retrieved_facts.get("byggnadsid")
+                or retrieved_facts.get("building_id")
+            )
+            building_id = (
+                metadata.get("building_id")
+                or byggnadsid
+                or building_match.get("building_id")
+            )
+            address_used = (
+                metadata.get("requested_address")
+                or metadata.get("address")
+                or metadata.get("address_from_user")
+                or building_match.get("input_address")
+                or retrieved_facts.get("address")
+                or retrieved_facts.get("epc_idadr")
+            )
+            session_join_key = f"spara-session-{row[0]}"
+            message_join_key = f"{session_join_key}-answer-{row[5]}"
             record = {
+                "session_join_key": session_join_key,
+                "message_join_key": message_join_key,
                 "session_id": row[0],
                 "session_token": row[1],
+                "thread_id": row[1],
                 "user_id": row[2],
                 "username": row[3],
                 "query_message_id": row[4],
@@ -932,9 +959,15 @@ def get_evaluation_records(
                 "intent": metadata.get("intent"),
                 "needs_clarification": metadata.get("needs_clarification"),
                 "out_of_scope": metadata.get("out_of_scope"),
-                "building_id": metadata.get("building_id"),
-                "building_match": metadata.get("building_match") or {},
-                "retrieved_facts": metadata.get("retrieved_facts") or {},
+                "building_id": building_id,
+                "byggnadsid": byggnadsid,
+                "address_used": address_used,
+                "requested_address": metadata.get("requested_address"),
+                "address_from_user": metadata.get("address_from_user"),
+                "epc_record_address": metadata.get("epc_record_address"),
+                "same_building_multiple_addresses": metadata.get("same_building_multiple_addresses"),
+                "building_match": building_match,
+                "retrieved_facts": retrieved_facts,
                 "vector_sources": metadata.get("vector_sources") or [],
                 "grounding": grounding,
                 "grounding_status": grounding.get("status"),
@@ -1002,6 +1035,7 @@ def insert_messages(messages: list[dict]):
             "Invalid role type in messages list. Valid roles are 'user', 'assistant', 'system'."
         )
 
+    inserted_message_ids = []
     try:
         observability_ready = ensure_message_observability_schema()
         connection = get_connection()
@@ -1030,11 +1064,12 @@ def insert_messages(messages: list[dict]):
                 params = (*params, Json(metadata))
             cursor.execute(insert_query, params)
             inserted_message_id = cursor.fetchone()[0]
+            inserted_message_ids.append(inserted_message_id)
             evidence_rows = _normalize_json_value(msg.get("evidence"), [])
             if observability_ready and evidence_rows:
                 _insert_message_evidence_rows(cursor, inserted_message_id, evidence_rows)
         connection.commit()
-        return
+        return inserted_message_ids
     except Exception:
         if connection is not None:
             connection.rollback()

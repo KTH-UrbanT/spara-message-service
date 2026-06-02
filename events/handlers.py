@@ -503,7 +503,7 @@ async def send_message(sid, data, session_id, session_id_int):
         redis_client.rpush(thread_name, message_data)
 
         # Insert message into the database
-        insert_messages(
+        inserted_user_message_ids = insert_messages(
             [
                 {
                     "content": message_dict["content"],
@@ -515,6 +515,9 @@ async def send_message(sid, data, session_id, session_id_int):
                 }
             ]
         )
+        if inserted_user_message_ids:
+            message_dict["message_id"] = inserted_user_message_ids[0]
+            redis_client.lset(thread_name, -1, json.dumps(message_dict))
 
         await session_updated(session_id, room=sid)
         await _emit_processing_status(
@@ -588,7 +591,7 @@ async def send_message(sid, data, session_id, session_id_int):
             redis_client.rpush(thread_name, json.dumps(response_message))
 
         # Insert response message into the database
-        insert_messages(
+        inserted_assistant_message_ids = insert_messages(
             [
                 {
                     "content": response_message["content"],
@@ -602,6 +605,12 @@ async def send_message(sid, data, session_id, session_id_int):
                 }
             ]
         )
+        if inserted_assistant_message_ids:
+            response_message["message_id"] = inserted_assistant_message_ids[0]
+            try:
+                redis_client.lset(thread_name, -1, json.dumps(response_message))
+            except Exception as exc:
+                print("Could not update assistant message_id in Redis:", exc)
 
         await session_updated(session_id, room=sid)
         await _emit_processing_status(

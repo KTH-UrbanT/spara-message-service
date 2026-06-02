@@ -8,8 +8,11 @@ from typing import Any, Iterable
 
 
 CSV_HEADERS = [
+    "session_join_key",
+    "message_join_key",
     "session_id",
     "session_token",
+    "thread_id",
     "user_id",
     "username",
     "query_message_id",
@@ -28,6 +31,12 @@ CSV_HEADERS = [
     "needs_clarification",
     "out_of_scope",
     "building_id",
+    "byggnadsid",
+    "address_used",
+    "requested_address",
+    "address_from_user",
+    "epc_record_address",
+    "same_building_multiple_addresses",
     "building_match",
     "retrieved_facts",
     "vector_sources",
