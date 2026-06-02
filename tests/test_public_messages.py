@@ -70,6 +70,7 @@ def test_to_public_message_payload_keeps_session_memory_metadata():
             "metadata": {
                 "address": "Artemisgatan 17",
                 "address_from_user": "Artemisgatan 17",
+                "address_location_hint": "Stockholm",
                 "requested_address": "Artemisgatan 17",
                 "epc_record_address": "Artemisgatan 13",
                 "same_building_multiple_addresses": True,
@@ -82,6 +83,7 @@ def test_to_public_message_payload_keeps_session_memory_metadata():
     assert payload["metadata"] == {
         "address": "Artemisgatan 17",
         "address_from_user": "Artemisgatan 17",
+        "address_location_hint": "Stockholm",
         "requested_address": "Artemisgatan 17",
         "epc_record_address": "Artemisgatan 13",
         "same_building_multiple_addresses": True,

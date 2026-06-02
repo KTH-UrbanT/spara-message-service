@@ -35,6 +35,7 @@ CSV_HEADERS = [
     "address_used",
     "requested_address",
     "address_from_user",
+    "address_location_hint",
     "epc_record_address",
     "same_building_multiple_addresses",
     "building_match",

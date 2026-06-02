@@ -132,7 +132,14 @@ def _metadata_has_building_context(metadata):
         current = stack.pop()
         if isinstance(current, dict):
             lower_keys = {str(key).lower() for key in current.keys()}
-            if lower_keys.intersection({"address", "address_from_user", "byggnadsid", "building_id", "selected_brf_building_id"}):
+            if lower_keys.intersection({
+                "address",
+                "address_from_user",
+                "address_location_hint",
+                "byggnadsid",
+                "building_id",
+                "selected_brf_building_id",
+            }):
                 return True
             stack.extend(current.values())
         elif isinstance(current, list):

@@ -30,6 +30,7 @@ PUBLIC_METADATA_FIELDS = (
     "evaluation_mode",
     "address",
     "address_from_user",
+    "address_location_hint",
     "requested_address",
     "epc_record_address",
     "same_building_multiple_addresses",

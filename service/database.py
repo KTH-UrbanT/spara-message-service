@@ -964,6 +964,7 @@ def get_evaluation_records(
                 "address_used": address_used,
                 "requested_address": metadata.get("requested_address"),
                 "address_from_user": metadata.get("address_from_user"),
+                "address_location_hint": metadata.get("address_location_hint"),
                 "epc_record_address": metadata.get("epc_record_address"),
                 "same_building_multiple_addresses": metadata.get("same_building_multiple_addresses"),
                 "building_match": building_match,

@@ -47,6 +47,7 @@ def test_evaluation_records_to_csv_flattens_structured_fields_as_json():
                 "address_used": "Examplegatan 1",
                 "requested_address": "Examplegatan 1",
                 "address_from_user": "Examplegatan 1",
+                "address_location_hint": "Stockholm",
                 "epc_record_address": "Examplegatan 3",
                 "same_building_multiple_addresses": True,
                 "building_match": {"matched_address": "Examplegatan 1"},
@@ -128,6 +129,7 @@ def test_evaluation_records_to_csv_flattens_structured_fields_as_json():
     assert rows[0]["address_used"] == "Examplegatan 1"
     assert rows[0]["requested_address"] == "Examplegatan 1"
     assert rows[0]["address_from_user"] == "Examplegatan 1"
+    assert rows[0]["address_location_hint"] == "Stockholm"
     assert rows[0]["epc_record_address"] == "Examplegatan 3"
     assert rows[0]["same_building_multiple_addresses"] == "True"
     assert rows[0]["route_correct"] == "True"
